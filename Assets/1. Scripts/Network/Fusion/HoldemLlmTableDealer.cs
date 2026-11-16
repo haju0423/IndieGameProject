@@ -20,6 +20,7 @@ namespace Poker.Online
         private readonly IHoldemOpenUtterancePort open;
         private readonly HoldemDealerTurnCoordinator coordinator;
         private readonly HoldemDealerAiAssist ai;
+        private readonly CryptographicRandomSource random = new CryptographicRandomSource();
         private readonly Stopwatch clock = Stopwatch.StartNew();
         private HoldemDealerWork current;
         private Guid fallbackWindow, revealHand;
@@ -29,7 +30,10 @@ namespace Poker.Online
 
         public static HoldemConfig CreateConfig(long stack = 100, long small = 1, long big = 2)
             => new HoldemConfig(stack, small, big, HoldemRevealPolicy.PauseAfterCommunityReveal,
-                HoldemAccusationMode.Disabled, HoldemDealPolicy.WaitForHost, turnAccusations: true);
+                HoldemAccusationMode.Disabled, HoldemDealPolicy.WaitForHost, ante: 1,
+                anteSteps: new long[] { 1, 1, 2, 2, 3, 4, 5, 7, 9, 12, 16, 21, 28, 37, 49, 65,
+                    86, 114, 151, 200, 265, 351, 465, 616, 816, 1081, 1432, 1897, 2513, 3329, 4410, 5842 },
+                turnAccusations: true);
 
         // Chat text stays public; OwnOnly hides which lines were designated for the dealer.
         public static HoldemUtterancePolicy CreateUtterancePolicy(int maximumLength = HoldemRoom.MaximumChatTextLength)
@@ -97,9 +101,11 @@ namespace Poker.Online
             bool fallback = fallbackPending && work.TargetDeal.WindowId == fallbackWindow;
             fallbackPending = false;
             int requests = work.SourceUtterances?.Count ?? 0;
-            if (!fallback && ai != null && requests > 0 && ai.Begin(work)) return;
+            bool normalDeal = !fallback && random.NextInt(5) == 0;
+            if (!fallback && !normalDeal && ai != null && requests > 0 && ai.Begin(work)) return;
+            ai?.Discard(work);
             HoldemDealerAiAssist.EditorLog("[AI 딜러] 최종 선택 → " + work.TargetDeal.Street + " 변경 없음 ("
-                + (fallback ? "이전 적용이 거절됨" : ai == null ? "씬에 로컬 LLM 없음"
+                + (fallback ? "이전 적용이 거절됨" : normalDeal ? "일반 덱 공개" : ai == null ? "씬에 로컬 LLM 없음"
                     : requests == 0 ? "딜러에게 한 말 없음" : "분석 시작 실패") + ")");
             coordinator.TryPostUnchanged(work);
         }
@@ -153,7 +159,7 @@ namespace Poker.Online
         public void Dispose()
         {
             if (disposed) return;
-            disposed = true; current = null; ai?.Dispose(); coordinator.Dispose();
+            disposed = true; current = null; ai?.Dispose(); coordinator.Dispose(); random.Dispose();
         }
     }
 }

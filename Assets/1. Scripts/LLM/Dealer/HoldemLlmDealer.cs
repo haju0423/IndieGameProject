@@ -110,6 +110,9 @@ namespace Poker.Llm
             runningWork = null; running = null;
         }
 
+        /// <summary>Discards prefetched analyses when this window will be dealt unchanged.</summary>
+        public void Discard(HoldemDealerWork work) => ForgetSource(work);
+
         /// <summary>True once the analysis has finished. A null result means it faulted: deal unchanged.</summary>
         public bool TryTake(out HoldemMentInterpretation result)
         {

@@ -34,8 +34,19 @@ public sealed class Play2FrontEnd : MonoBehaviour
         table = owner;
         tableCamera = camera;
         var root = GetComponent<UIDocument>().rootVisualElement;
-        hud = new Play2TableHud(root.Q("table-hud"), table);
+        root.pickingMode = PickingMode.Ignore;
         chatCanvas.Initialize(table);
+        var canvasObject = new GameObject("Play2 Game HUD", typeof(RectTransform), typeof(Canvas),
+            typeof(UnityEngine.UI.CanvasScaler), typeof(UnityEngine.UI.GraphicRaycaster));
+        canvasObject.transform.SetParent(transform, false);
+        var canvas = canvasObject.GetComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        var scaler = canvasObject.GetComponent<UnityEngine.UI.CanvasScaler>();
+        scaler.uiScaleMode = UnityEngine.UI.CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1280, 720);
+        scaler.matchWidthOrHeight = .5f;
+        chatCanvas.GetComponent<Canvas>().sortingOrder = 10;
+        hud = new Play2TableHud(canvasObject.transform, table, chatCanvas.Font, this);
         title = root.Q("title");
         form = root.Q("form");
         lobby = root.Q("lobby");

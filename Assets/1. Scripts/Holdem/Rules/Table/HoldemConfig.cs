@@ -19,8 +19,8 @@ namespace Poker.Foundation
             {
                 if (smallBlind <= 0) throw new ArgumentOutOfRangeException(nameof(smallBlind));
                 if (bigBlind < smallBlind) throw new ArgumentOutOfRangeException(nameof(bigBlind));
-                if (ante != 0 || fixedBetIncrement != 0 || anteSteps?.Length > 0 || incrementFollowsAnte)
-                    throw new ArgumentException("Ante and fixed increment require the shared-ante policy.");
+                if (ante < 0 || fixedBetIncrement != 0 || incrementFollowsAnte || (ante == 0 && anteSteps?.Length > 0))
+                    throw new ArgumentException("Invalid no-limit ante or fixed increment.");
             }
             else if (bettingPolicy == HoldemBettingPolicy.SharedAnteFixed)
             {
@@ -113,8 +113,11 @@ namespace Poker.Foundation
         public HoldemConfig ForRound(long roundInMatch)
         {
             if (roundInMatch < 1) throw new ArgumentOutOfRangeException(nameof(roundInMatch));
-            if (anteSteps.Length == 0 || BettingPolicy == HoldemBettingPolicy.NoLimit) return this;
+            if (anteSteps.Length == 0) return this;
             long currentAnte = AnteForRound(roundInMatch);
+            if (BettingPolicy == HoldemBettingPolicy.NoLimit)
+                return new HoldemConfig(StartingStack, SmallBlind, BigBlind, RevealPolicy, AccusationMode,
+                    DealPolicy, BettingPolicy, ante: currentAnte, turnAccusations: TurnAccusations);
             if (BettingPolicy == HoldemBettingPolicy.SharedAnteSequential)
                 return new HoldemConfig(StartingStack, 0, 0, RevealPolicy, AccusationMode, DealPolicy,
                     BettingPolicy, ante: currentAnte, sequentialRules: SequentialRules);

@@ -16,14 +16,16 @@ namespace Poker.Application
             history.Clear(); omittedHistoryCount = 0; historySnapshot = null;
             accusationAdmissions.Clear();
             var current = session.GetSnapshot(members[0].Seat);
-            bool hasAnte = rules.BettingPolicy != HoldemBettingPolicy.NoLimit;
+            bool hasAnte = rules.Ante > 0;
             if (hasAnte)
             {
                 for (int i = 0; i < current.SeatCount; i++)
                 {
                     var seat = current.GetSeatAt(i);
+                    long initial = previous == null ? rules.StartingStack : previous.GetSeat(seat.Seat).Stack;
+                    long paid = System.Math.Min(initial, current.PostedAnte);
                     if (seat.WasDealtIn) AppendHistory(new HoldemHistoryEntry(HoldemHistoryKind.Ante,
-                        HoldemStreet.Preflop, seat.Seat, null, seat.Committed, seat.Committed, seat.Stack == 0));
+                        HoldemStreet.Preflop, seat.Seat, null, paid, paid, paid == initial));
                 }
             }
             else
@@ -36,7 +38,7 @@ namespace Poker.Application
                 var seat = current.GetSeatAt(i);
                 long initial = previous == null ? rules.StartingStack : previous.GetSeat(seat.Seat).Stack;
                 long paid = hasAnte
-                    ? (seat.WasDealtIn ? seat.Committed : 0)
+                    ? (seat.WasDealtIn ? System.Math.Min(initial, current.PostedAnte) : 0)
                     : seat.IsSmallBlind ? System.Math.Min(initial, rules.SmallBlind)
                     : seat.IsBigBlind ? System.Math.Min(initial, rules.BigBlind) : 0;
                 AddHistoryReturn(HoldemStreet.Preflop, seat.Seat, seat.Stack - initial + paid - seat.Awarded);

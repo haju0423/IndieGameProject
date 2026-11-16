@@ -174,7 +174,7 @@ namespace Poker.Foundation
             BettingPolicy = hand.Config.BettingPolicy;
             PostedAnte = BettingPolicy == HoldemBettingPolicy.SharedAnteFixed
                 ? Math.Min(hand.Config.Ante, hand.ContributionLimit)
-                : BettingPolicy == HoldemBettingPolicy.SharedAnteSequential ? hand.Config.Ante : 0;
+                : hand.Config.Ante;
             CanAccuseOnTurn = hand.CanAccuseOnTurn(viewer);
             ButtonSeat = hand.ButtonSeat;
             SmallBlindSeat = hand.SmallBlindSeat;
@@ -308,7 +308,7 @@ namespace Poker.Foundation
                 for (int i = 0; i < best.Length; i++) best[i] = evaluated.GetBestCard(i);
             }
             long awarded = hand.Result != null && dealt ? hand.Result.GetAwardedTo(seat) : 0;
-            bool hasBlinds = hand.Config.BettingPolicy == HoldemBettingPolicy.NoLimit;
+            bool hasBlinds = hand.Config.BettingPolicy == HoldemBettingPolicy.NoLimit && hand.Config.Ante == 0;
             return new HoldemSeatView(seat, tableIndex, seat == viewer, dealt,
                 seat == hand.ButtonSeat, hasBlinds && seat == hand.SmallBlindSeat, hasBlinds && seat == hand.BigBlindSeat,
                 hand.CurrentSeat == seat, status, chips,

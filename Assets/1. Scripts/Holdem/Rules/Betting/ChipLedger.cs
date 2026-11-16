@@ -10,17 +10,26 @@ namespace Poker.Foundation
     public sealed class ChipLedger
     {
         private readonly SeatChips[] seats;
+        // Committed stays as the matched wager for side-pot eligibility, even after a payout.
+        private readonly long[] removed;
+        // False-accusation fines belong to the main pot, not the payer's betting cap.
+        private readonly long deadMoney;
 
-        private ChipLedger(SeatChips[] ownedSeats, long totalChips)
+        private ChipLedger(SeatChips[] ownedSeats, long totalChips, long[] removed = null, long deadMoney = 0)
         {
+            this.removed = removed ?? new long[ownedSeats.Length];
+            this.deadMoney = deadMoney;
             long stacks = 0;
-            long contributions = 0;
+            long contributions = deadMoney;
             checked
             {
-                foreach (SeatChips seat in ownedSeats)
+                for (int i = 0; i < ownedSeats.Length; i++)
                 {
+                    SeatChips seat = ownedSeats[i];
+                    if (this.removed[i] < 0 || this.removed[i] > seat.Committed)
+                        throw new InvalidOperationException("Invalid paid-out contribution.");
                     stacks += seat.Stack;
-                    contributions += seat.Committed;
+                    contributions += seat.Committed - this.removed[i];
                 }
                 if (stacks + contributions != totalChips)
                     throw new InvalidOperationException("A movement must conserve the ledger's chips.");
@@ -35,6 +44,34 @@ namespace Poker.Foundation
         public long TotalChips { get; }
         /// <summary>Unsettled hand contributions after refunds, not an already awarded pot.</summary>
         public long TotalCommitted { get; }
+        internal long DeadMoney => deadMoney;
+        internal bool HasAccusationPayments
+        {
+            get { if (deadMoney != 0) return true; foreach (long amount in removed) if (amount != 0) return true; return false; }
+        }
+        internal long RemovedContribution(SeatId seat) => removed[FindSeatIndex(seat)];
+
+        internal ChipLedger PayContributionTo(SeatId from, SeatId recipient)
+        {
+            int source = FindSeatIndex(from), destination = FindSeatIndex(recipient);
+            if (source == destination) throw new ArgumentException("The recipient must be another seat.");
+            long amount = seats[source].Committed - removed[source];
+            var next = (SeatChips[])seats.Clone();
+            next[destination] = new SeatChips(recipient, checked(seats[destination].Stack + amount), seats[destination].Committed);
+            var paid = (long[])removed.Clone();
+            paid[source] = seats[source].Committed;
+            return new ChipLedger(next, TotalChips, paid, deadMoney);
+        }
+
+        internal ChipLedger AddDeadMoney(SeatId seat, long amount)
+        {
+            if (amount < 0) throw new ArgumentOutOfRangeException(nameof(amount));
+            int index = FindSeatIndex(seat);
+            if (amount > seats[index].Stack) throw new InvalidOperationException("Insufficient stack.");
+            var next = (SeatChips[])seats.Clone();
+            next[index] = new SeatChips(seat, seats[index].Stack - amount, seats[index].Committed);
+            return new ChipLedger(next, TotalChips, removed, checked(deadMoney + amount));
+        }
 
         /// <summary>
         /// Copies starting balances in the given order. Zero stacks are valid bookkeeping,
@@ -98,7 +135,7 @@ namespace Poker.Foundation
             if (amount <= 0) throw new ArgumentOutOfRangeException(nameof(amount));
             int index = FindSeatIndex(seat);
             SeatChips current = seats[index];
-            if (amount > current.Committed) throw new InvalidOperationException("The refund exceeds this seat's contribution.");
+            if (amount > current.Committed - removed[index]) throw new InvalidOperationException("The refund exceeds this seat's contribution.");
             return WithBalance(index, checked(current.Stack + amount), checked(current.Committed - amount));
         }
 
@@ -115,7 +152,7 @@ namespace Poker.Foundation
             var next = (SeatChips[])seats.Clone();
             next[source] = new SeatChips(from, checked(seats[source].Stack - amount), seats[source].Committed);
             next[destination] = new SeatChips(to, checked(seats[destination].Stack + amount), seats[destination].Committed);
-            return new ChipLedger(next, TotalChips);
+            return new ChipLedger(next, TotalChips, removed, deadMoney);
         }
 
         // Settlement supplies a complete award vector in ledger order; no public arbitrary-payout/reset API.
@@ -139,7 +176,7 @@ namespace Poker.Foundation
         {
             var next = (SeatChips[])seats.Clone();
             next[index] = new SeatChips(seats[index].Owner, stack, committed);
-            return new ChipLedger(next, TotalChips);
+            return new ChipLedger(next, TotalChips, removed, deadMoney);
         }
 
         private int FindSeatIndex(SeatId seat)

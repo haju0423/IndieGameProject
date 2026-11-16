@@ -1,7 +1,6 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements">
     <ui:Style src="FrontEnd.uss" />
-    <ui:Template name="hud" src="TableHud.uxml" />
-    <ui:VisualElement class="shell">
+    <ui:VisualElement class="shell" picking-mode="Ignore">
         <ui:VisualElement name="title" class="screen title">
             <ui:Label text="♠   ♥   ♣   ♦" class="suits" />
             <ui:Label text="ONE MORE CARD" class="wordmark" />
@@ -61,7 +60,6 @@
                 </ui:VisualElement>
             </ui:VisualElement>
         </ui:VisualElement>
-        <ui:Instance template="hud" class="screen" picking-mode="Ignore" />
         <ui:VisualElement name="curtain" class="screen curtain hidden" picking-mode="Ignore" />
     </ui:VisualElement>
 </ui:UXML>

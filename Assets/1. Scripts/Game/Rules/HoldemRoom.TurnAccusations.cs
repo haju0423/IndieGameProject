@@ -52,17 +52,22 @@ namespace Poker.Application
                 if (receipt.Accepted && before != null && receipt.Version > before.SessionVersion)
                 {
                     var after = session.GetSnapshot(member.Seat);
-                    bool caught = after.Result?.Kind == HoldemResultKind.Accusation;
+                    bool caught = after.GetSeat(input.Target).Status == HoldemSeatStatus.Folded;
                     lastTurnAccusation = new HoldemTurnAccusationNotice(before.HandId, before.Street,
                         member.Seat, input.Target, caught);
+                    long movement = caught ? before.GetSeat(input.Target).Committed
+                        : Math.Min(before.PostedAnte, before.GetSeat(member.Seat).Stack);
+                    if (movement > 0) AppendHistory(new HoldemHistoryEntry(caught ? HoldemHistoryKind.AccusationPayout : HoldemHistoryKind.AccusationFine,
+                        before.Street, member.Seat, null, movement, 0, false));
                     if (!caught)
                     {
                         lastAction = new HoldemActionNotice(member.Seat, BettingAction.Fold(), 0, before.Street);
                         seatActions[member.Seat.Value - 1] = lastAction;
                         AppendHistory(new HoldemHistoryEntry(HoldemHistoryKind.Action, before.Street, member.Seat,
                             BettingActionKind.Fold, 0, before.OwnStreetContribution, false));
-                        RecordHistoryReturns(before, after, member.Seat, 0);
                     }
+                    RecordHistoryReturns(before, after, member.Seat, caught ? 0 : movement,
+                        caught ? member.Seat : (SeatId?)null, caught ? movement : 0);
                     SynchronizeUtterances();
                     revision++;
                 }

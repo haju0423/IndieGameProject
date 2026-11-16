@@ -16,6 +16,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     private Play2TablePreview table;
     private HoldemRoomPacket packet;
     private long lastMessage = -1;
+    internal TMPro.TMP_FontAsset Font => messages.font;
 
     internal void Initialize(Play2TablePreview owner)
     {

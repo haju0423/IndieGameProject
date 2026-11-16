@@ -10,6 +10,56 @@ namespace Poker.Foundation.Tests
 {
     public sealed partial class HoldemDealerTurnTests
     {
+        [TestCase(true)]
+        [TestCase(false)]
+        public void AnteAndAccusationHistoryRoundTripsForClients(bool caught)
+        {
+            Create(config: HoldemLlmTableDealer.CreateConfig(), policy: HoldemLlmTableDealer.CreateUtterancePolicy());
+            Start();
+            Assert.That(State.PotAmount, Is.EqualTo(4));
+            Speak(3, "요청", designate: false);
+            EndBetting();
+            var deal = caught ? SelectSentence() : Read().CreateUnchangedCommand(Guid.NewGuid());
+            Assert.That(room.ApplyDealerDeal(peers[0], deal).Accepted, Is.True);
+            Resume();
+            var before = State;
+            Assert.That(before.CurrentSeat.Value, Is.EqualTo(new SeatId(2)));
+            Assert.That(room.SubmitLegacyTurnAccusation(peers[1], new HoldemRoomLegacyTurnAccusation(
+                before.SessionId, before.HandId, Guid.NewGuid(), before.SessionVersion, new SeatId(3))).Accepted, Is.True);
+            var after = State;
+            Assert.That(after.PotAmount, Is.EqualTo(caught ? 3 : 5));
+            foreach (var peer in peers)
+            {
+                var packet = HoldemRoomPacketMapper.Create(room.Read(peer));
+                Assert.DoesNotThrow(() => HoldemHistoryPacketReader.Read(packet));
+            }
+            for (int i = 0; i < 32 && State.Result == null; i++)
+            {
+                if (State.CurrentSeat.HasValue) Act();
+                else if (State.IsSettlementPending)
+                    Assert.That(room.ResolveSettlement(peers[0], Guid.NewGuid(), State.SessionVersion,
+                        HoldemOddChipRule.ClockwiseFromButton).Accepted, Is.True);
+                else if (State.IsRevealPending) Resume();
+                else if (State.IsDealPending)
+                    Assert.That(room.DealUnchanged(peers[0], Read().CreateUnchangedCommand(Guid.NewGuid())).Accepted, Is.True);
+                else Assert.Fail("Hand cannot advance.");
+                foreach (var peer in peers)
+                {
+                    var packet = HoldemRoomPacketMapper.Create(room.Read(peer));
+                    Assert.DoesNotThrow(() => HoldemHistoryPacketReader.Read(packet));
+                }
+            }
+            Assert.That(State.Result, Is.Not.Null);
+        }
+
+        [Test]
+        public void GameAnteStartsAtOneAndGrowsMoreSlowlyThanFibonacci()
+        {
+            var config = HoldemLlmTableDealer.CreateConfig();
+            CollectionAssert.AreEqual(new long[] { 1, 1, 2, 2, 3, 4, 5, 7, 9, 12 },
+                Enumerable.Range(1, 10).Select(i => config.ForRound(i).Ante));
+        }
+
         private HoldemDealCommand SelectSentence(int card = 45)
         {
             var turn = Read();

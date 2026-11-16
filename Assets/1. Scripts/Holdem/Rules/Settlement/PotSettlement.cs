@@ -53,7 +53,7 @@ namespace Poker.Foundation
         {
             if (ledger == null) throw new ArgumentNullException(nameof(ledger));
             if (liveValues == null) throw new ArgumentNullException(nameof(liveValues));
-            long highest = RequireMatchedPot(ledger);
+            long highest = ledger.HasAccusationPayments ? 0 : RequireMatchedPot(ledger);
             int count = liveValues.Count;
             if (count < 2 || count > ledger.SeatCount)
                 throw new ArgumentException("At least two live values are required.", nameof(liveValues));
@@ -70,14 +70,14 @@ namespace Poker.Foundation
                 caps.Add(paid);
             }
             SeatId[] priority = CopyPriority(oddChipPriority, values);
-            if (caps.Max < highest) throw new SettlementException(SettlementFailure.NoEligibleWinner);
+            if (!ledger.HasAccusationPayments && caps.Max < highest) throw new SettlementException(SettlementFailure.NoEligibleWinner);
 
             var awards = new long[ledger.SeatCount];
             var pots = new List<PotAward>();
             long lower = 0;
             foreach (long cap in caps)
             {
-                long amount = 0;
+                long amount = lower == 0 ? ledger.DeadMoney : 0;
                 var eligible = new List<SeatId>();
                 var winners = new List<SeatId>();
                 HandValue best = default;
@@ -85,7 +85,11 @@ namespace Poker.Foundation
                 {
                     SeatId seat = ledger.GetSeatAt(i);
                     long paid = ledger.GetChips(seat).Committed;
-                    amount = checked(amount + Math.Min(Math.Max(0, paid - lower), cap - lower));
+                    long remaining = paid - ledger.RemovedContribution(seat);
+                    long layer = Math.Max(0, remaining - lower);
+                    // Any dead money above all surviving caps goes to the highest eligible layer.
+                    if (!ledger.HasAccusationPayments || cap != caps.Max) layer = Math.Min(layer, cap - lower);
+                    amount = checked(amount + layer);
                     if (paid < cap || !values.TryGetValue(seat, out HandValue value)) continue;
                     eligible.Add(seat);
                     if (winners.Count == 0 || value > best)
@@ -123,6 +127,7 @@ namespace Poker.Foundation
         {
             if (ledger == null) throw new ArgumentNullException(nameof(ledger));
             SeatChips winner = ledger.GetChips(soleWinner);
+            if (ledger.HasAccusationPayments) return AwardEntirePot(ledger, soleWinner);
             long highest = RequireMatchedPot(ledger);
             if (winner.Committed != highest) throw new SettlementException(SettlementFailure.NoEligibleWinner);
             var awards = new long[ledger.SeatCount];
