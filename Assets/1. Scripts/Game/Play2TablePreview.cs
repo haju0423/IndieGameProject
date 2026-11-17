@@ -17,6 +17,7 @@ public sealed class Play2TablePreview : MonoBehaviour
     [SerializeField] private Transform[] eyes;
     [SerializeField] private CardVisual cardPrefab;
     [SerializeField] private Material requestMarkerMaterial;
+    [SerializeField] private Material chipMaterial;
     [SerializeField] private Play2FrontEnd frontEnd;
 
     private const float BoardDealDuration = 0.95f;
@@ -29,6 +30,9 @@ public sealed class Play2TablePreview : MonoBehaviour
     private HoldemRoomPacket state;
     private string handId;
     private int viewer, board;
+    private Play2TableChips chips;
+    private Transform deck;
+    private Vector3 DealOrigin => deck.TransformPoint(Vector3.up * .022f);
     private float animationUntil;
     private float nextPreviewAction;
 
@@ -46,6 +50,20 @@ public sealed class Play2TablePreview : MonoBehaviour
             return;
         }
 
+        chips = new GameObject("Table pot").AddComponent<Play2TableChips>();
+        chips.transform.SetParent(tabletop, false);
+        chips.Initialize(eyes, chipMaterial);
+        deck = new GameObject("Dealer deck").transform;
+        deck.SetParent(tabletop, false);
+        deck.localPosition = new Vector3(.29f, .016f, .29f);
+        var template = cardPrefab.transform.Find("Back");
+        for (int i = 0; i < 4; i++)
+        {
+            var back = Instantiate(template, deck, false);
+            back.localPosition = new Vector3(i * .0008f, i * .0035f, 0);
+            back.localRotation = Quaternion.Euler(0, -16f, 180f) * template.localRotation;
+            back.localScale = template.localScale * 1.45f;
+        }
         frontEnd.Initialize(this);
         SetState(session.State);
     }
@@ -69,10 +87,13 @@ public sealed class Play2TablePreview : MonoBehaviour
     private void SetState(HoldemRoomPacket packet)
     {
         if (ReferenceEquals(state, packet) && viewer != 0) return;
+        chips.Present(state, packet);
+        deck.gameObject.SetActive(packet?.hasGame == true);
         state = packet;
         int viewerSeat = state?.viewerSeat ?? 1;
         if (viewerSeat != viewer)
         {
+            ClearCards();
             viewer = viewerSeat;
             var eye = eyes[viewer - 1];
             seatCamera.transform.SetPositionAndRotation(eye.position, eye.rotation);
@@ -107,7 +128,7 @@ public sealed class Play2TablePreview : MonoBehaviour
             CardVisual firstCard = CreateHoleCard(showFaces, showFaces ? seat.visibleCards[0] : 0);
             CardVisual secondCard = CreateHoleCard(showFaces, showFaces ? seat.visibleCards[1] : 0);
             grips[player] = new Play2CardGrip(players[player], own ? seatCamera.transform : null,
-                tabletop, eyes[player], firstCard, secondCard, delay, gap);
+                tabletop, eyes[player], DealOrigin, firstCard, secondCard, delay, gap);
             if (folded) grips[player].Fold();
             else animationUntil = Mathf.Max(animationUntil, Time.time + delay + Play2CardGrip.Duration(gap));
         }
@@ -155,24 +176,24 @@ public sealed class Play2TablePreview : MonoBehaviour
         var pose = card.transform;
         Quaternion boardFacing = Quaternion.Euler(0f, seatCamera.transform.eulerAngles.y, 0f);
         Vector3 end = boardFacing * new Vector3(-0.35f + index * 0.175f, 0.012f, -0.055f);
-        Vector3 start = boardFacing * new Vector3(0f, 0.15f, 0.43f);
+        Vector3 start = tabletop.InverseTransformPoint(DealOrigin);
         pose.localScale = Vector3.one * 1.65f;
         pose.localPosition = start;
         pose.localRotation = boardFacing * Quaternion.Euler(0f, 0f, 179.9f);
 
         var motion = AddDealMotion(card, start, end);
-        motion.AddFeedback(new MMF_Rotation
-        {
-            AnimateRotationTarget = pose, Mode = MMF_Rotation.Modes.ToDestination,
-            ToDestinationSpace = Space.Self, DestinationAngles = boardFacing.eulerAngles,
-            AnimateRotationDuration = 0.27f,
-            ToDestinationTween = new MMTweenType(AnimationCurve.EaseInOut(0, 0, 1, 1)),
-            Timing = new MMFeedbackTiming { InitialDelay = 0.54f }
-        });
         motion.Initialization();
         motion.PlayFeedbacks();
 
-        yield return new WaitForSeconds(BoardDealDuration);
+        yield return new WaitForSeconds(.54f);
+        var back = pose.localRotation;
+        for (float t = 0; t < 1; t += Time.deltaTime / .27f)
+        {
+            pose.localRotation = Quaternion.Slerp(back, boardFacing, Mathf.SmoothStep(0, 1, t));
+            yield return null;
+        }
+        pose.localRotation = boardFacing;
+        yield return new WaitForSeconds(BoardDealDuration - .81f);
         boardCards[index] = card;
         UpdateRequestMarker(index);
     }

@@ -50,24 +50,42 @@ internal sealed partial class Play2TableHud
     private (RectTransform panel, TextMeshProUGUI hand, TextMeshProUGUI amount, TextMeshProUGUI heading,
         RectTransform adjustments, RectTransform allIn) BuildBetPicker(RectTransform parent, TMP_FontAsset font)
     {
-        var panel = MakePicker("Bet Sizing", parent, font, out var hand);
-        var body = Play2HudArt.Plate("Bet Card", panel, new Vector2(0, -24), new Vector2(440, 242), "PinePanel");
-        Play2HudArt.Plate("Diamond", body, new Vector2(-195, 91), new Vector2(15, 18), "Diamond");
-        var heading = Play2UGui.Text("Heading", body, "베팅 금액", new Vector2(-80, 91), new Vector2(202, 28), 21,
-            Play2UGui.Cream, font, TextAlignmentOptions.MidlineLeft, FontStyles.Bold);
-        var amount = Play2UGui.Text("Chips", body, "", new Vector2(0, 44), new Vector2(212, 55), 43,
+        var panel = Play2UGui.Rect("Bet Sizing", parent, Vector2.zero, new Vector2(258, 248));
+        panel.anchorMin = panel.anchorMax = panel.pivot = Vector2.one;
+        panel.anchoredPosition = new Vector2(-Play2UGui.SidePanelMargin, -Play2UGui.SidePanelTop - Play2UGui.ActionAreaHeight - 5);
+        var body = Play2HudArt.Plate("Bet Card", panel, Vector2.zero, panel.sizeDelta, "PinePanel", true);
+        var heading = Play2UGui.Text("Heading", body, "베팅 금액", new Vector2(-54, 92), new Vector2(117, 28), 17,
+            Play2UGui.Gold, font, TextAlignmentOptions.MidlineLeft, FontStyles.Bold);
+        var hand = Play2UGui.Text("Current Hand", body, "", new Vector2(51, 92), new Vector2(113, 28), 13,
+            Play2UGui.Cream, font, TextAlignmentOptions.MidlineRight);
+        Play2HudArt.Fit(hand, 10);
+        var amount = Play2UGui.Text("Chips", body, "", new Vector2(0, 58), new Vector2(222, 38), 23,
             Play2UGui.Cream, font, style: FontStyles.Bold);
-        Play2HudArt.Fit(amount, 22);
+        Play2HudArt.Fit(amount, 15);
         var adjustments = Play2UGui.Fill("Adjustments", body);
-        Arrow(adjustments, new Vector2(-138, 43), true);
-        Arrow(adjustments, new Vector2(138, 43), false);
-        Play2UGui.Text("Adjustment Step", adjustments, "Shift + ← / →   10칩", new Vector2(0, 11), new Vector2(242, 20), 12,
-            Play2UGui.Gold, font);
-        KeyAction(adjustments, font, "Home", "최소", new Vector2(-140, -23), new Vector2(126, 40), "ActionRow");
-        KeyAction(adjustments, font, "P", "하프", new Vector2(0, -23), new Vector2(126, 40), "ActionRow");
-        var allIn = KeyAction(adjustments, font, "A", "올인", new Vector2(140, -23), new Vector2(126, 40), "ActionRow");
-        KeyAction(body, font, "Enter", "확정", new Vector2(-96, -83), new Vector2(215, 46), "GoldButton");
-        KeyAction(body, font, "Esc", "취소", new Vector2(120, -83), new Vector2(169, 46), "HeaderBadge");
+        Play2HudArt.Button("Decrease", adjustments, "−", new Vector2(-96, 14), new Vector2(36, 39), "ActionRow", Play2UGui.Cream, font, () => StepBet(-1));
+        Play2HudArt.Button("Increase", adjustments, "+", new Vector2(96, 14), new Vector2(36, 39), "ActionRow", Play2UGui.Cream, font, () => StepBet(1));
+        var track = Play2UGui.Panel("Bet Slider", adjustments, new Vector2(0, 14), new Vector2(150, 42), Color.clear, true);
+        amountSlider = track.gameObject.AddComponent<UnityEngine.UI.Slider>();
+        amountSlider.wholeNumbers = true;
+        amountSlider.navigation = new UnityEngine.UI.Navigation { mode = UnityEngine.UI.Navigation.Mode.None };
+        var rail = Play2UGui.Panel("Rail", track, Vector2.zero, new Vector2(134, 6), Play2UGui.Hex("776D5C"));
+        var fill = Play2UGui.Fill("Fill", rail);
+        Play2UGui.Image(fill, Play2UGui.Gold);
+        amountSlider.fillRect = fill;
+        var grip = Play2UGui.Rect("Grip Area", track, Vector2.zero, new Vector2(134, 26));
+        var handle = Play2HudArt.Plate("Grip", grip, Vector2.zero, new Vector2(18, 0), "Keycap", true);
+        amountSlider.handleRect = handle;
+        amountSlider.targetGraphic = handle.GetComponent<UnityEngine.UI.Image>();
+        amountSlider.onValueChanged.AddListener(value => SelectBet(value > maximumBet ? packet.game.legal.allInTarget : (long)value));
+        Play2HudArt.Button("Minimum", adjustments, "최소", new Vector2(-77, -30), new Vector2(70, 36), "ActionRow", Play2UGui.Cream, font, () => SelectBet(minimumBet));
+        Play2HudArt.Button("Half", adjustments, "하프", new Vector2(0, -30), new Vector2(70, 36), "ActionRow", Play2UGui.Cream, font, SelectHalf);
+        var allIn = (RectTransform)Play2HudArt.Button("All In", adjustments, "올인", new Vector2(77, -30), new Vector2(70, 36), "ActionRow", Play2UGui.Cream, font, () => SelectBet(WholeStack)).transform;
+        Play2HudArt.Button("Commit", body, "확정 (Space)", new Vector2(-40, -84), new Vector2(141, 43),
+            "GoldButton", PaperInk, font, () => RaiseTo(betAmount), 18);
+        Play2HudArt.Button("Cancel Bet", body, "취소", new Vector2(76, -84), new Vector2(72, 43),
+            "HeaderBadge", Play2UGui.Cream, font, CloseActionPanels);
+        panel.gameObject.SetActive(false);
         return (panel, hand, amount, heading, adjustments, allIn);
     }
 
@@ -77,13 +95,15 @@ internal sealed partial class Play2TableHud
         var panel = MakePicker("Accusation", parent, font, out var hand);
         var body = Play2HudArt.Plate("Accusation Card", panel, new Vector2(0, -18), new Vector2(440, 230), "PinePanel");
         PickerHeading(body, "고발 대상", 85, font);
-        Arrow(body, new Vector2(-183, 22), true);
-        Arrow(body, new Vector2(183, 22), false);
+        Play2HudArt.Clickable(Arrow(body, new Vector2(-183, 22), true), () => StepSuspect(-1));
+        Play2HudArt.Clickable(Arrow(body, new Vector2(183, 22), false), () => StepSuspect(1));
         var plates = new UnityEngine.UI.Image[3];
         var names = new TextMeshProUGUI[plates.Length];
         for (int i = 0; i < plates.Length; i++)
         {
             var choice = Play2HudArt.Plate("Target " + (i + 1), body, Vector2.zero, new Vector2(94, 49), "HeaderBadge");
+            int index = i;
+            Play2HudArt.Clickable(choice, () => { suspectIndex = index; UpdateSuspect(); });
             plates[i] = choice.GetComponent<UnityEngine.UI.Image>();
             names[i] = Play2UGui.Text("Player", choice, "", Vector2.zero, new Vector2(82, 38), 20,
                 Play2UGui.Cream, font, style: FontStyles.Bold);
@@ -93,8 +113,8 @@ internal sealed partial class Play2TableHud
             Play2HudArt.Fit(names[i], 12);
         }
 
-        KeyAction(body, font, "Enter", "고발", new Vector2(-96, -74), new Vector2(215, 46), "RedButton");
-        KeyAction(body, font, "Esc", "취소", new Vector2(120, -74), new Vector2(169, 46), "HeaderBadge");
+        Play2HudArt.Button("Confirm Accusation", body, "고발 확정 (Space)", new Vector2(-96, -74), new Vector2(215, 46), "RedButton", Play2UGui.Cream, font, ConfirmAccusation);
+        Play2HudArt.Clickable(KeyAction(body, font, "Esc", "취소", new Vector2(120, -74), new Vector2(169, 46), "HeaderBadge"), CloseActionPanels);
         return (panel, hand, plates, names);
     }
 
@@ -102,7 +122,9 @@ internal sealed partial class Play2TableHud
     {
         private readonly RectTransform card;
         private readonly TextMeshProUGUI title, winners, requests;
-        private readonly UnityEngine.UI.Button next;
+        private readonly UnityEngine.UI.Button next, review;
+        private string handId;
+        private bool viewingTable;
         private readonly TextMeshProUGUI nextLabel;
         private readonly (RectTransform frame, TextMeshProUGUI name, TextMeshProUGUI message,
             TextMeshProUGUI interpretation, TextMeshProUGUI result, TextMeshProUGUI position)[] rows = new
@@ -113,6 +135,13 @@ internal sealed partial class Play2TableHud
             card = Play2HudArt.Plate("Settlement Card", parent, new Vector2(0, -10), new Vector2(526, 220), "CreamPanel");
             var mark = Play2HudArt.Plate("Diamond", card, Vector2.zero, new Vector2(16, 18), "Diamond");
             Top(mark, -87, -34);
+            var inspect = Play2HudArt.Button("Inspect Table", card, "테이블 보기", Vector2.zero, new Vector2(102, 32),
+                "ActionRow", Play2UGui.Cream, font, () => SetTableView(true), 15);
+            Top((RectTransform)inspect.transform, 191, -35);
+            review = Play2HudArt.Button("Review Settlement", parent, "정산 다시 보기", Vector2.zero, new Vector2(166, 38),
+                "ActionRow", Play2UGui.Cream, font, () => SetTableView(false), 16);
+            Top((RectTransform)review.transform, 0, -133);
+            review.gameObject.SetActive(false);
             title = TextAtTop("Heading", "이번 판 종료", 4, -34, 152, 31, 24, PaperInk);
             winners = TextAtTop("Winners", "", 0, -83, 480, 58, 38, ResultInk);
             Play2HudArt.Fit(winners, 20);
@@ -126,6 +155,7 @@ internal sealed partial class Play2TableHud
                 var row = Play2HudArt.Plate("Request " + (i + 1), card, Vector2.zero, new Vector2(470, 51), "PaperRow");
                 Top(row, 0, -183 - i * 54);
                 var name = RowText(row, "Player", -190, 0, 70, 29, 14, TextAlignmentOptions.Center);
+                Play2HudArt.Fit(name, 10);
                 var message = RowText(row, "Message", -19, 9, 255, 20, 15, TextAlignmentOptions.MidlineLeft);
                 var interpretation = RowText(row, "Interpretation", -19, -10, 255, 18, 12, TextAlignmentOptions.MidlineLeft);
                 var result = RowText(row, "Card", 166, 8, 108, 24, 18, TextAlignmentOptions.Center);
@@ -167,14 +197,28 @@ internal sealed partial class Play2TableHud
             rect.anchoredPosition = new Vector2(x, y);
         }
 
-        internal void Hide() => card.gameObject.SetActive(false);
+        private void SetTableView(bool view)
+        {
+            viewingTable = view;
+            card.gameObject.SetActive(!view);
+            review.gameObject.SetActive(view);
+        }
+
+        internal void Hide()
+        {
+            card.gameObject.SetActive(false);
+            review.gameObject.SetActive(false);
+            viewingTable = false;
+        }
 
         internal void Present(HoldemRoomPacket packet, bool oddChips, bool isHost, Func<int, string> name)
         {
             var game = packet.game;
             bool show = game.hasResult || oddChips;
-            card.gameObject.SetActive(show);
-            if (!show) return;
+            if (!show) { Hide(); return; }
+            if (handId != game.handId) viewingTable = false;
+            handId = game.handId;
+            SetTableView(viewingTable);
 
             bool canAdvance = isHost && !packet.paused && (oddChips || game.canContinue);
             next.gameObject.SetActive(canAdvance);

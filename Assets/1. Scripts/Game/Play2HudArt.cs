@@ -56,6 +56,17 @@ internal static class Play2HudArt
         return button;
     }
 
+    internal static UnityEngine.UI.Button Clickable(RectTransform plate, UnityAction click)
+    {
+        var image = plate.GetComponent<UnityEngine.UI.Image>();
+        image.raycastTarget = true;
+        var button = plate.gameObject.AddComponent<Play2ActionButton>();
+        button.targetGraphic = image;
+        button.navigation = new UnityEngine.UI.Navigation { mode = UnityEngine.UI.Navigation.Mode.None };
+        button.onClick.AddListener(click);
+        return button;
+    }
+
     internal static void Keycap(Transform parent, TMP_FontAsset font, string key, Vector2 position, float width = 38)
     {
         var cap = Plate(key + " Keycap", parent, position, new Vector2(width, 23), "Keycap");

@@ -167,7 +167,8 @@ public sealed class Play2RoomSession : MonoBehaviour
         if (preview != null || online != null || connecting) return;
         status = "";
         previewRandom = new CryptographicRandomSource();
-        var host = new HoldemClientIdentity("You");
+        var nickname = PlayerPrefs.GetString("Play2.Nickname", "").Trim();
+        var host = new HoldemClientIdentity(nickname.Length == 0 ? "플레이어" : nickname);
         preview = new HoldemHostCommandBridge(host, HoldemLlmTableDealer.CreateConfig(),
             new SeatId(1), previewRandom, utterancePolicy: HoldemLlmTableDealer.CreateUtterancePolicy(), chatEnabled: true);
         var analyzer = CreateRoomAnalyzer(hostAnalyzer);

@@ -14,7 +14,7 @@ internal sealed class Play2CardGrip
     private readonly Play2FingerRig fingers;
     private readonly Pose contact;
     private readonly Quaternion wristRest;
-    private readonly Vector3 outward, lateral, deck, foldPile;
+    private readonly Vector3 outward, lateral, deck, tableCenter, foldPile;
     private readonly Quaternion deckRotation, foldRotation;
     private readonly float firstLaunch, gap, heldCardScale;
     private readonly CardVisual first, second;
@@ -25,7 +25,7 @@ internal sealed class Play2CardGrip
 
     internal static float Duration(float gap) => gap + Flight + Lift;
 
-    internal Play2CardGrip(GameObject player, Transform view, Transform table, Transform eye,
+    internal Play2CardGrip(GameObject player, Transform view, Transform table, Transform eye, Vector3 dealOrigin,
         CardVisual first, CardVisual second, float delay, float gap)
     {
         camera = view;
@@ -36,7 +36,8 @@ internal sealed class Play2CardGrip
         firstLaunch = Time.time + delay;
         outward = Vector3.ProjectOnPlane(eye.position - table.position, Vector3.up).normalized;
         lateral = Vector3.Cross(outward, Vector3.up);
-        deck = table.position + Vector3.up * 0.045f;
+        tableCenter = table.position + Vector3.up * 0.045f;
+        deck = dealOrigin;
         deckRotation = Quaternion.LookRotation(-outward) * Quaternion.Euler(0f, 0f, 180f);
         foldRotation = deckRotation * Quaternion.AngleAxis(90f, Vector3.up);
         foldPile = table.position + outward * 0.48f + lateral * 0.08f + Vector3.up * 0.006f;
@@ -45,6 +46,8 @@ internal sealed class Play2CardGrip
         if (left)
         {
             viewModel = Object.Instantiate(player, camera, false);
+            if (player.TryGetComponent<Play2FingerRig>(out var originalRig))
+                viewModel.GetComponent<Play2FingerRig>().BindViewCopy(originalRig);
             viewModel.name = "First Person Left Arm";
             viewModel.transform.SetLocalPositionAndRotation(Vector3.zero, Quaternion.identity);
             viewModel.transform.localScale = player.transform.lossyScale;
@@ -104,8 +107,8 @@ internal sealed class Play2CardGrip
         }
         else
         {
-            Vector3 catchPoint = deck + outward * 0.54f + lateral * 0.12f;
-            Vector3 held = deck + outward * 0.60f + lateral * 0.14f + Vector3.up * 0.065f;
+            Vector3 catchPoint = tableCenter + outward * 0.54f + lateral * 0.12f;
+            Vector3 held = tableCenter + outward * 0.60f + lateral * 0.14f + Vector3.up * 0.065f;
             gripPoint = Vector3.Lerp(Vector3.Lerp(wrist.TransformPoint(contact.position), catchPoint, reach), held, lift);
             Vector3 face = Vector3.Lerp(outward * 0.55f + Vector3.up * 0.83f, outward + Vector3.up * 0.58f, lift);
             cardRotation = Quaternion.LookRotation(Vector3.ProjectOnPlane(Vector3.up, face), face);

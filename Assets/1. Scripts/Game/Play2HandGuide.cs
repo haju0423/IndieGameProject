@@ -39,6 +39,8 @@ internal sealed class Play2HandGuide
         this.sidebar = sidebar;
         panel = Play2UGui.Fill("My Hand", sidebar);
         var header = Play2UGui.Rect("Current Hand", panel, Vector2.zero, Vector2.zero);
+        Play2UGui.Image(header, Color.clear, true);
+        Play2HudArt.Clickable(header, Toggle);
         header.anchorMin = new Vector2(0, 1);
         header.anchorMax = Vector2.one;
         header.offsetMin = new Vector2(11, -SummaryHeight);
@@ -236,6 +238,10 @@ internal sealed class Play2HandGuide
         if (index == 2 || index == 6 || index == 8 || index == 9) return $"{RankText(high)} {Ranks[index].name}";
         return Ranks[index].name;
     }
+
+    internal static string CategoryLabel(HandValue value) =>
+        Ranks[value.Category == HandCategory.StraightFlush && value.GetTieBreaker(0) == (int)Rank.Ace
+            ? 0 : 10 - (int)value.Category].name;
 
     internal static string CardText(PokerCard card) => RankText((int)card.Rank) + "♣♦♥♠"[(int)card.Suit - 1];
 

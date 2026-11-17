@@ -17,6 +17,14 @@ public sealed partial class Play2FingerRig : MonoBehaviour
         public int BoneIndex;
         public bool Thumb;
 
+        public Finger ForBones(Transform[] bones)
+        {
+            var copy = (Finger)MemberwiseClone();
+            copy.Proximal = bones[BoneIndex];
+            copy.Distal = bones[BoneIndex + 1];
+            return copy;
+        }
+
         public void Curl(float amount)
         {
             Proximal.localRotation = Quaternion.AngleAxis(amount * (Thumb ? 18f : 32f), BaseAxis);
@@ -32,6 +40,17 @@ public sealed partial class Play2FingerRig : MonoBehaviour
         rig = animator.gameObject.AddComponent<Play2FingerRig>();
         rig.Bind(animator, skin, left, right);
         return rig;
+    }
+
+    // A first-person copy can originate from a seat that already has runtime finger joints.
+    // Unity remaps the renderer's bones but does not copy the nonserialized finger bindings.
+    internal void BindViewCopy(Play2FingerRig original)
+    {
+        var skin = GetComponentInChildren<SkinnedMeshRenderer>(true);
+        var bones = skin.bones;
+        hands = Array.ConvertAll(original.hands, hand => Array.ConvertAll(hand, finger => finger.ForBones(bones)));
+        riggedMesh = Instantiate(skin.sharedMesh);
+        skin.sharedMesh = riggedMesh;
     }
 
     public int FingerCount(bool left) => hands[left ? 0 : 1].Length;

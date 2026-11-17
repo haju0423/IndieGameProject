@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using TMPro;
 using Poker.Application;
 using Poker.Foundation;
@@ -16,8 +17,8 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     [SerializeField] private UnityEngine.UI.Toggle dealer;
     [SerializeField] private UnityEngine.UI.Button send;
 
-    private const float PanelWidth = 251f;
-    private const float CompactHeight = 164f;
+    private const float PanelWidth = 276f;
+    private const float CompactHeight = 218f;
     private static readonly Color ChatText = Play2UGui.Hex("F0E6CB");
 
     private Play2TablePreview table;
@@ -28,7 +29,11 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     private UnityEngine.UI.Outline inputFocus;
     private GameObject closeHint;
     private long firstMessage = -1, lastMessage = -1;
-    private bool expanded;
+    private bool expanded, recordsOpen, focusRequested;
+    private InputAction openChat;
+    private TMP_Text historyLabel;
+    private float savedChatOffset, layoutCanvasHeight;
+    private int visibleRecords = -1;
     internal TMPro.TMP_FontAsset Font => messages.font;
     internal bool IsTyping => panel.activeInHierarchy && (expanded || input.isFocused);
 
@@ -36,8 +41,19 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     {
         table = owner;
         BuildLayout();
+        input.richText = input.textComponent.richText = false;
+        if (input.placeholder is TMP_Text hint) hint.text = "Enter로 대화하기";
+        openChat = new InputAction("Open table chat", InputActionType.Button);
+        openChat.AddBinding("<Keyboard>/enter");
+        openChat.AddBinding("<Keyboard>/numpadEnter");
+        openChat.performed += _ => focusRequested = panel.activeInHierarchy && input.interactable && !input.isFocused;
+        openChat.Enable();
         send.onClick.AddListener(Send);
-        input.onSelect.AddListener(_ => SetExpanded(true));
+        input.onSelect.AddListener(_ =>
+        {
+            if (recordsOpen) ToggleHistory();
+            SetExpanded(true);
+        });
         input.onSubmit.AddListener(_ => Send());
         input.restoreOriginalTextOnEscape = false;
         panel.SetActive(false);
@@ -67,6 +83,12 @@ public sealed class Play2ChatCanvas : MonoBehaviour
             13, Play2UGui.Gold, Font, TextAlignmentOptions.MidlineRight);
         hint.rectTransform.anchorMin = hint.rectTransform.anchorMax = Vector2.one;
         closeHint = hint.gameObject;
+        var history = Play2HudArt.Button("History", panelRect, "채택 기록", Vector2.zero, new Vector2(90, 27),
+            "ActionRow", Play2UGui.Cream, Font, ToggleHistory, 14);
+        var header = (RectTransform)history.transform;
+        header.anchorMin = header.anchorMax = new Vector2(.5f, 1);
+        header.anchoredPosition = new Vector2(0, -19);
+        historyLabel = history.GetComponentInChildren<TMP_Text>();
         var divider = Play2UGui.Panel("Chat Divider", panelRect, new Vector2(0, -35), new Vector2(227, 1.2f),
             Play2UGui.Hex("D6C094"));
         divider.anchorMin = divider.anchorMax = new Vector2(.5f, 1f);
@@ -110,7 +132,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         if (dealer.targetGraphic != null) dealer.targetGraphic = Play2HudArt.Skin(dealer.targetGraphic, "PlayingCheck");
         if (dealer.graphic != null) dealer.graphic = Play2HudArt.Skin(dealer.graphic, "PlayingTick");
         var dealerLabel = dealer.GetComponentInChildren<TMP_Text>();
-        dealerLabel.text = "딜러에게 요청";
+        dealerLabel.text = "이 문장을 딜러에게도 요청";
         dealerLabel.color = ChatText;
         dealerLabel.fontSize = 15;
         var sendRect = (RectTransform)send.transform;
@@ -124,9 +146,38 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         ApplyLayout();
     }
 
+    internal bool HandleEnter()
+    {
+        if (!focusRequested) return false;
+        focusRequested = false;
+        if (!panel.activeInHierarchy || !input.interactable) return false;
+        if (recordsOpen) ToggleHistory();
+        input.Select();
+        input.ActivateInputField();
+        SetExpanded(true);
+        return true;
+    }
+
+    internal void DiscardFocusRequest() => focusRequested = false;
+    private void OnDestroy() => openChat?.Dispose();
+
+    private void ToggleHistory()
+    {
+        if (packet?.hasGame != true) return;
+        if (!recordsOpen) savedChatOffset = scroll.verticalNormalizedPosition <= .02f ? -1 : scroll.content.anchoredPosition.y;
+        recordsOpen = !recordsOpen;
+        if (recordsOpen) { input.DeactivateInputField(); SetExpanded(true); }
+        firstMessage = lastMessage = -2;
+        visibleRecords = -1;
+        RefreshRows(true);
+        if (!recordsOpen) RestoreScroll(savedChatOffset >= 0, savedChatOffset);
+    }
+
     private void LateUpdate()
     {
         if (!IsTyping) return;
+        if (expanded && !Mathf.Approximately(((RectTransform)panelRect.parent).rect.height, layoutCanvasHeight))
+            RestoreScroll(scroll.verticalNormalizedPosition > .01f, scroll.content.anchoredPosition.y);
         var keyboard = Keyboard.current;
         var mouse = Mouse.current;
         bool clickedOutside = mouse != null && mouse.leftButton.wasPressedThisFrame
@@ -138,6 +189,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
                 && events.currentSelectedGameObject.transform.IsChildOf(panelRect))
                 events.SetSelectedGameObject(null);
             input.DeactivateInputField();
+            if (recordsOpen) ToggleHistory();
             SetExpanded(false);
         }
     }
@@ -155,11 +207,11 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     private void ApplyLayout()
     {
         panelRect.anchorMin = Vector2.zero;
-        panelRect.anchorMax = expanded ? Vector2.up : Vector2.zero;
+        panelRect.anchorMax = Vector2.zero;
         const float left = 11f;
         const float bottom = 15f;
         panelRect.offsetMin = new Vector2(left, bottom);
-        panelRect.offsetMax = new Vector2(left + PanelWidth, expanded ? -Play2UGui.SidePanelTop : bottom + CompactHeight);
+        panelRect.offsetMax = new Vector2(left + PanelWidth, bottom + CompactHeight);
         scrollRect.offsetMin = new Vector2(12, 84);
         scrollRect.offsetMax = new Vector2(expanded ? -25 : -11, -47);
         closeHint.SetActive(expanded);
@@ -172,6 +224,13 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     private void RestoreScroll(bool keepOffset, float offset)
     {
         UnityEngine.UI.LayoutRebuilder.ForceRebuildLayoutImmediate(scroll.content);
+        if (expanded)
+        {
+            float desired = Mathf.Max(CompactHeight + 42f, scroll.content.rect.height + 146f);
+            layoutCanvasHeight = ((RectTransform)panelRect.parent).rect.height;
+            float height = Mathf.Min(desired, layoutCanvasHeight - Play2UGui.SidePanelTop - panelRect.offsetMin.y);
+            panelRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, height);
+        }
         scroll.StopMovement();
         float maxOffset = scroll.content.rect.height - scroll.viewport.rect.height;
         scroll.verticalNormalizedPosition = keepOffset && maxOffset > 0 ? 1f - Mathf.Clamp01(offset / maxOffset) : 0f;
@@ -180,12 +239,20 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     internal void Present(HoldemRoomPacket value)
     {
         if (ReferenceEquals(packet, value)) return;
+        if (packet?.sessionId != value?.sessionId || packet?.viewerSeat != value?.viewerSeat
+            || packet?.game?.handId != value?.game?.handId)
+        {
+            visibleRecords = -1;
+            firstMessage = lastMessage = -2;
+        }
         packet = value;
         bool visible = packet?.hasGame == true && packet.hasChat;
         panel.SetActive(visible);
         if (!visible)
         {
             firstMessage = lastMessage = -1;
+            recordsOpen = focusRequested = false;
+            visibleRecords = -1;
             foreach (var row in rows) row.root.gameObject.SetActive(false);
             input.SetTextWithoutNotify("");
             dealer.SetIsOnWithoutNotify(false);
@@ -200,6 +267,32 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         dealer.interactable = canRequest;
         if (!canRequest) dealer.SetIsOnWithoutNotify(false);
 
+        RefreshRows(false);
+    }
+
+    private void RefreshRows(bool switching)
+    {
+        var records = packet.dealerSelections;
+        int count = records?.Length ?? 0;
+        historyLabel.text = recordsOpen ? "대화로" : $"채택 기록 {count}";
+        if (recordsOpen)
+        {
+            if (visibleRecords == count && !switching) return;
+            visibleRecords = count;
+            var allowed = HoldemDealerSelectionPacketReader.Read(packet);
+            for (int i = 0; i < allowed.Count; i++)
+            {
+                var item = allowed[i];
+                string card = item.AppliedCard.HasValue ? $"공용 {item.BoardIndex.Value + 1}번  {Play2HandGuide.CardText(item.AppliedCard.Value)}" : "문장 채택";
+                string meaning = string.IsNullOrWhiteSpace(item.Interpretation) ? "" : "\n" + item.Interpretation;
+                SetRow(i, Name(item.Speaker.Value), item.Text + meaning + "\n" + card);
+            }
+            if (count == 0) SetRow(0, "딜러", "아직 채택된 문장이 없습니다.");
+            for (int i = Mathf.Max(1, count); i < rows.Count; i++) rows[i].root.gameObject.SetActive(false);
+            RestoreScroll(false, 0);
+            scroll.verticalNormalizedPosition = 1;
+            return;
+        }
         var entries = packet.chat.entries;
         long oldest = entries.Length == 0 ? -1 : entries[0].sequence;
         long newest = entries.Length == 0 ? -1 : entries[entries.Length - 1].sequence;
@@ -211,15 +304,22 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         float offset = scroll.content.anchoredPosition.y;
         for (int i = 0; i < entries.Length; i++)
         {
-            if (i == rows.Count) rows.Add(CreateMessageRow());
             var entry = entries[i];
-            var row = rows[i];
-            row.speaker.text = entry.seat == packet.viewerSeat ? "나" : $"{entry.seat}번";
-            row.text.text = entry.text;
-            row.root.gameObject.SetActive(true);
+            SetRow(i, Name(entry.seat), entry.text);
         }
         for (int i = entries.Length; i < rows.Count; i++) rows[i].root.gameObject.SetActive(false);
         RestoreScroll(keepScroll, offset);
+    }
+
+    private string Name(int seat) => packet.members.FirstOrDefault(m => m.seat == seat)?.name ?? $"{seat}번";
+
+    private void SetRow(int index, string name, string text)
+    {
+        if (index == rows.Count) rows.Add(CreateMessageRow());
+        var row = rows[index];
+        row.speaker.text = name;
+        row.text.text = text;
+        row.root.gameObject.SetActive(true);
     }
 
     private (RectTransform root, TMP_Text speaker, TMP_Text text) CreateMessageRow()
@@ -231,18 +331,24 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         line.childForceExpandWidth = line.childForceExpandHeight = false;
         line.spacing = 9;
 
-        var badge = Play2HudArt.Plate("Speaker Badge", root, Vector2.zero, new Vector2(48, 25), "PlayingKey");
+        var badge = Play2HudArt.Plate("Speaker Badge", root, Vector2.zero, new Vector2(65, 25), "PlayingKey");
         var badgeLayout = badge.gameObject.AddComponent<UnityEngine.UI.LayoutElement>();
-        badgeLayout.preferredWidth = 48;
+        badgeLayout.minWidth = badgeLayout.preferredWidth = 65;
         badgeLayout.preferredHeight = 25;
-        var speaker = Play2UGui.Text("Speaker", badge, "", Vector2.zero, new Vector2(46, 24), 16,
+        var speaker = Play2UGui.Text("Speaker", badge, "", Vector2.zero, new Vector2(63, 24), 16,
             Play2UGui.Ink, Font, style: FontStyles.Bold);
 
+        speaker.richText = false;
+        speaker.textWrappingMode = TextWrappingModes.NoWrap;
+        speaker.overflowMode = TextOverflowModes.Ellipsis;
+        Play2HudArt.Fit(speaker, 11);
         var text = Play2UGui.Text("Message", root, "", Vector2.zero, Vector2.zero, 15, ChatText, Font,
             TextAlignmentOptions.Left);
         text.margin = new Vector4(0, 3, 0, 0);
         text.richText = false;
         var textLayout = text.gameObject.AddComponent<UnityEngine.UI.LayoutElement>();
+        textLayout.minWidth = 0;
+        textLayout.preferredWidth = 0;
         textLayout.minHeight = 25;
         textLayout.flexibleWidth = 1;
         return (root, speaker, text);
