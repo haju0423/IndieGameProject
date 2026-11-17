@@ -21,10 +21,12 @@ namespace Poker.Foundation
         {
             if (!CanAccuseLegacyOnTurn(accuser)) throw new InvalidOperationException("This seat cannot accuse now.");
             if (!IsTurnAccusationTarget(accuser, target)) throw new ArgumentException("Invalid accusation target.", nameof(target));
-            if (!caught) return Apply(accuser, BettingAction.Fold());
-            HoldemSettlement settlement = HoldemSettlement.AwardAccusation(CurrentBetting.Ledger, accuser, target,
-                ButtonSeat, BigBlindSeat);
-            return WithComplete(checked(Version + 1), board, deck, CurrentBetting, settlement);
+            long fine = caught ? 0 : Math.Min(Config.Ante, Ledger.GetChips(accuser).Stack);
+            BettingRound next = CurrentBetting.ResolveAccusation(accuser, target, caught, fine);
+            SeatId folded = caught ? target : accuser;
+            long version = checked(Version + 1);
+            var candidate = NewState(version, AddFolded(folded), board, deck.Copy(), Street, next, null, null, null);
+            return next.IsComplete ? candidate.AdvanceAfterCompletedBetting(folded, version) : candidate;
         }
     }
 }

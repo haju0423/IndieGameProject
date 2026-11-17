@@ -54,6 +54,8 @@ namespace Poker.Online
             return true;
         }
 
+        internal void Discard(HoldemDealerWork work) => dealer.Discard(work);
+
         /// <summary>Owner thread, after Poll. Posts a finished analysis once; failures post an unchanged deal.</summary>
         internal bool TryPost(HoldemDealerTurnCoordinator coordinator, HoldemDealerWork current, out string summary)
         {

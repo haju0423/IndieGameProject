@@ -12,6 +12,225 @@ namespace Poker.Foundation.Tests
         private static readonly SeatId C = new SeatId(999);
         private static readonly SeatId D = new SeatId(55);
 
+        private sealed class AnteTestRandom : IRandomSource
+        {
+            public int NextInt(int exclusiveMax) => exclusiveMax - 1;
+        }
+
+        [Test]
+        public void CatchingTheUnmatchedRaiserDoesNotRefundTheirAlreadyPaidBet()
+        {
+            var config = new HoldemConfig(100, 1, 2, HoldemRevealPolicy.PauseAfterCommunityReveal,
+                HoldemAccusationMode.Disabled, HoldemDealPolicy.WaitForHost, ante: 1, turnAccusations: true);
+            var session = new HoldemSession(Guid.NewGuid(), config, new[] { A, B, C, D }, A, new AnteTestRandom());
+            Assert.That(session.StartNextHand(Guid.NewGuid(), Guid.NewGuid(), 0).Accepted, Is.True);
+            while (session.GetSnapshot(A).CurrentSeat.HasValue)
+            {
+                var actor = session.GetSnapshot(A).CurrentSeat.Value;
+                var own = session.GetSnapshot(actor);
+                Assert.That(session.Submit(actor, HoldemCommand.Act(session.SessionId, own.HandId, Guid.NewGuid(),
+                    actor, own.SessionVersion, BettingAction.Check())).Accepted, Is.True);
+            }
+            var deal = session.PendingDeal;
+            var change = new HoldemCardChange(Guid.NewGuid(), Guid.NewGuid(), C, deal.BoardStart,
+                Card.FromId(45), HoldemCardSourceScope.UndealtOutsideCurrentHandRunout);
+            Assert.That(session.ApplyDealerDeal(new HoldemDealCommand(session.SessionId, deal.HandId, deal.WindowId,
+                Guid.NewGuid(), session.Version, deal.Street, change)).Accepted, Is.True);
+            Assert.That(session.ReadCurrentRevealCardChange(C), Is.Not.Null);
+            Assert.That(session.ResumeAfterReveal(new HoldemRevealCommand(session.SessionId, deal.HandId,
+                Guid.NewGuid(), session.Version, deal.Street)).Accepted, Is.True);
+            var state = session.GetSnapshot(B);
+            Assert.That(session.Submit(B, HoldemCommand.Act(session.SessionId, state.HandId, Guid.NewGuid(),
+                B, state.SessionVersion, BettingAction.Check())).Accepted, Is.True);
+            state = session.GetSnapshot(C);
+            Assert.That(session.Submit(C, HoldemCommand.Act(session.SessionId, state.HandId, Guid.NewGuid(),
+                C, state.SessionVersion, BettingAction.BetTo(10))).Accepted, Is.True);
+            state = session.GetSnapshot(D);
+            Assert.That(session.SubmitTurnAccusation(D, new HoldemTurnAccusationCommand(session.SessionId,
+                state.HandId, Guid.NewGuid(), D, state.SessionVersion, C)).Accepted, Is.True);
+            foreach (SeatId actor in new[] { A, B })
+            {
+                state = session.GetSnapshot(actor);
+                Assert.That(session.Submit(actor, HoldemCommand.Act(session.SessionId, state.HandId, Guid.NewGuid(),
+                    actor, state.SessionVersion, BettingAction.Fold())).Accepted, Is.True);
+            }
+            state = session.GetSnapshot(D);
+            Assert.That(state.Result, Is.Not.Null);
+            Assert.That(state.GetSeat(C).Stack, Is.EqualTo(89));
+            Assert.That(state.GetSeat(D).Stack, Is.EqualTo(113));
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void HeadsUpAccusationEndsNormallyWhenOnlyOnePlayerRemains(bool caught)
+        {
+            var config = new HoldemConfig(100, 1, 2, HoldemRevealPolicy.PauseAfterCommunityReveal,
+                HoldemAccusationMode.Disabled, HoldemDealPolicy.WaitForHost, ante: 1, turnAccusations: true);
+            var session = new HoldemSession(Guid.NewGuid(), config, new[] { A, B }, A, new AnteTestRandom());
+            Assert.That(session.StartNextHand(Guid.NewGuid(), Guid.NewGuid(), 0).Accepted, Is.True);
+            while (session.GetSnapshot(A).CurrentSeat.HasValue)
+            {
+                var actor = session.GetSnapshot(A).CurrentSeat.Value;
+                var own = session.GetSnapshot(actor);
+                Assert.That(session.Submit(actor, HoldemCommand.Act(session.SessionId, own.HandId, Guid.NewGuid(),
+                    actor, own.SessionVersion, BettingAction.Check())).Accepted, Is.True);
+            }
+            var deal = session.PendingDeal;
+            var change = caught ? new HoldemCardChange(Guid.NewGuid(), Guid.NewGuid(), A,
+                deal.BoardStart, Card.FromId(45), HoldemCardSourceScope.UndealtOutsideCurrentHandRunout) : null;
+            Assert.That(session.ApplyDealerDeal(new HoldemDealCommand(session.SessionId, deal.HandId, deal.WindowId,
+                Guid.NewGuid(), session.Version, deal.Street, change)).Accepted, Is.True);
+            if (caught) Assert.That(session.ReadCurrentRevealCardChange(A), Is.Not.Null);
+            Assert.That(session.ResumeAfterReveal(new HoldemRevealCommand(session.SessionId, deal.HandId,
+                Guid.NewGuid(), session.Version, deal.Street)).Accepted, Is.True);
+            var before = session.GetSnapshot(B);
+            Assert.That(session.SubmitTurnAccusation(B, new HoldemTurnAccusationCommand(session.SessionId,
+                before.HandId, Guid.NewGuid(), B, before.SessionVersion, A)).Accepted, Is.True);
+            var after = session.GetSnapshot(B);
+            Assert.That(after.Result, Is.Not.Null);
+            Assert.That(after.GetSeat(A).Stack, Is.EqualTo(caught ? 99 : 102));
+            Assert.That(after.GetSeat(B).Stack, Is.EqualTo(caught ? 101 : 98));
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void AccusationHandlesShortFineAndAllInTarget(bool targetAllIn)
+        {
+            long ante = targetAllIn ? 1 : 5;
+            var config = new HoldemConfig(100, 1, 2, HoldemRevealPolicy.PauseAfterCommunityReveal,
+                HoldemAccusationMode.Disabled, HoldemDealPolicy.WaitForHost, ante: ante, turnAccusations: true);
+            var session = new HoldemSession(Guid.NewGuid(), config,
+                targetAllIn ? Ledger(100, 100, 1, 100) : Ledger(100, 7, 100, 100),
+                new[] { A, B, C, D }, A, new AnteTestRandom());
+            Assert.That(session.StartNextHand(Guid.NewGuid(), Guid.NewGuid(), 0).Accepted, Is.True);
+            while (session.GetSnapshot(A).CurrentSeat.HasValue)
+            {
+                var actor = session.GetSnapshot(A).CurrentSeat.Value;
+                var own = session.GetSnapshot(actor);
+                Assert.That(session.Submit(actor, HoldemCommand.Act(session.SessionId, own.HandId,
+                    Guid.NewGuid(), actor, own.SessionVersion, BettingAction.Check())).Accepted, Is.True);
+            }
+            var deal = session.PendingDeal;
+            var change = targetAllIn ? new HoldemCardChange(Guid.NewGuid(), Guid.NewGuid(), C,
+                deal.BoardStart, Card.FromId(45), HoldemCardSourceScope.UndealtOutsideCurrentHandRunout) : null;
+            Assert.That(session.ApplyDealerDeal(new HoldemDealCommand(session.SessionId, deal.HandId, deal.WindowId,
+                Guid.NewGuid(), session.Version, deal.Street, change)).Accepted, Is.True);
+            if (targetAllIn) Assert.That(session.ReadCurrentRevealCardChange(C), Is.Not.Null);
+            Assert.That(session.ResumeAfterReveal(new HoldemRevealCommand(session.SessionId, deal.HandId,
+                Guid.NewGuid(), session.Version, deal.Street)).Accepted, Is.True);
+            var before = session.GetSnapshot(B);
+            Assert.That(before.CurrentSeat, Is.EqualTo(B));
+            Assert.That(session.SubmitTurnAccusation(B, new HoldemTurnAccusationCommand(session.SessionId,
+                before.HandId, Guid.NewGuid(), B, before.SessionVersion, C)).Accepted, Is.True);
+            var after = session.GetSnapshot(B);
+            Assert.That(after.GetSeat(targetAllIn ? C : B).Status, Is.EqualTo(HoldemSeatStatus.Folded));
+            Assert.That(after.PotAmount, Is.EqualTo(before.PotAmount + (targetAllIn ? -1 : 2)));
+            Assert.That(after.GetSeat(B).Stack, Is.EqualTo(targetAllIn ? before.GetSeat(B).Stack + 1 : 0));
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void TurnAccusationPaysTargetOrAddsFineAndFinishesSidePots(bool hit)
+        {
+            var config = new HoldemConfig(100, 1, 2, HoldemRevealPolicy.PauseAfterCommunityReveal,
+                HoldemAccusationMode.Disabled, HoldemDealPolicy.WaitForHost, ante: 1, turnAccusations: true);
+            var seats = new[] { A, B, C, D };
+            var session = new HoldemSession(Guid.NewGuid(), config, Ledger(6, 100, 100, 100), seats, A,
+                new AnteTestRandom(), HoldemOddChipRule.ClockwiseFromButton);
+            Assert.That(session.StartNextHand(Guid.NewGuid(), Guid.NewGuid(), 0).Accepted, Is.True);
+            for (int i = 0; i < 4; i++)
+            {
+                var state = session.GetSnapshot(A);
+                var actor = state.CurrentSeat.Value;
+                var own = session.GetSnapshot(actor);
+                var action = i == 0 ? BettingAction.BetTo(20) : BettingAction.Call();
+                Assert.That(session.Submit(actor, HoldemCommand.Act(session.SessionId, own.HandId, Guid.NewGuid(),
+                    actor, own.SessionVersion, action)).Accepted, Is.True);
+            }
+            var deal = session.PendingDeal;
+            Assert.That(deal, Is.Not.Null);
+            HoldemCardChange change = hit ? new HoldemCardChange(Guid.NewGuid(), Guid.NewGuid(), C,
+                deal.BoardStart, Card.FromId(45), HoldemCardSourceScope.UndealtOutsideCurrentHandRunout) : null;
+            Assert.That(session.ApplyDealerDeal(new HoldemDealCommand(session.SessionId, deal.HandId, deal.WindowId,
+                Guid.NewGuid(), session.Version, deal.Street, change)).Accepted, Is.True);
+            if (hit) Assert.That(session.ReadCurrentRevealCardChange(C), Is.Not.Null);
+            Assert.That(session.ResumeAfterReveal(new HoldemRevealCommand(session.SessionId, deal.HandId,
+                Guid.NewGuid(), session.Version, deal.Street)).Accepted, Is.True);
+            var before = session.GetSnapshot(B);
+            Assert.That(before.CurrentSeat, Is.EqualTo(B));
+            Assert.That(session.SubmitTurnAccusation(B, new HoldemTurnAccusationCommand(session.SessionId,
+                before.HandId, Guid.NewGuid(), B, before.SessionVersion, C)).Accepted, Is.True);
+            var after = session.GetSnapshot(B);
+            Assert.That(after.Result, Is.Null);
+            Assert.That(after.GetSeat(hit ? C : B).Status, Is.EqualTo(HoldemSeatStatus.Folded));
+            Assert.That(after.PotAmount, Is.EqualTo(hit ? before.PotAmount - 21 : before.PotAmount + 1));
+            Assert.That(after.GetSeat(B).Stack, Is.EqualTo(before.GetSeat(B).Stack + (hit ? 21 : -1)));
+            for (int step = 0; step < 40 && session.GetSnapshot(B).Result == null; step++)
+            {
+                var state = session.GetSnapshot(B);
+                if (state.CurrentSeat.HasValue)
+                {
+                    var actor = state.CurrentSeat.Value; var own = session.GetSnapshot(actor);
+                    Assert.That(session.Submit(actor, HoldemCommand.Act(session.SessionId, own.HandId, Guid.NewGuid(),
+                        actor, own.SessionVersion, own.LegalActions.CanCheck ? BettingAction.Check() : BettingAction.Call())).Accepted, Is.True);
+                }
+                else if (state.IsRevealPending)
+                    Assert.That(session.ResumeAfterReveal(new HoldemRevealCommand(session.SessionId, state.HandId,
+                        Guid.NewGuid(), state.SessionVersion, state.Street)).Accepted, Is.True);
+                else if (session.PendingDeal != null)
+                {
+                    var next = session.PendingDeal;
+                    Assert.That(session.DealUnchanged(new HoldemDealCommand(session.SessionId, next.HandId, next.WindowId,
+                        Guid.NewGuid(), session.Version, next.Street)).Accepted, Is.True);
+                }
+                else Assert.Fail("Hand cannot advance.");
+            }
+            var result = session.GetSnapshot(B);
+            Assert.That(result.Result, Is.Not.Null);
+            long total = 0;
+            foreach (var seat in seats) total += result.GetSeat(seat).Stack;
+            Assert.That(total, Is.EqualTo(306));
+            Assert.That(result.Result.PotCount, Is.EqualTo(2));
+            Assert.That(result.Result.GetPot(0).Amount, Is.EqualTo(hit ? 18 : 25));
+            Assert.That(result.Result.GetPot(1).Amount, Is.EqualTo(hit ? 30 : 45));
+        }
+
+        [Test]
+        public void NoLimitAnteIsMandatoryAndDoesNotCountAsStreetBet()
+        {
+            var opening = BettingRound.BeginNoLimitAnte(Ledger(100, 100, 2), new[] { A, B, C }, 5, 2);
+            Assert.That(opening.Ledger.TotalCommitted, Is.EqualTo(12));
+            Assert.That(opening.Ledger.GetChips(A).Committed, Is.EqualTo(5));
+            Assert.That(opening.Ledger.GetChips(B).Committed, Is.EqualTo(5));
+            Assert.That(opening.Ledger.GetChips(C).Committed, Is.EqualTo(2));
+            Assert.That(opening.IsAllIn(C), Is.True);
+            Assert.That(opening.CurrentBet, Is.Zero);
+            Assert.That(opening.GetStreetContribution(A), Is.Zero);
+            Assert.That(opening.GetLegalActions().CanCheck, Is.True);
+        }
+
+        [Test]
+        public void NoLimitAnteReturnsOnlyTheUnmatchedPartWhenOnePlayerCanPayMore()
+        {
+            var opening = BettingRound.BeginNoLimitAnte(Ledger(100, 3, 2), new[] { A, B, C }, 5, 2);
+            Assert.That(opening.Ledger.GetChips(A).Committed, Is.EqualTo(3));
+            Assert.That(opening.Ledger.GetChips(B).Committed, Is.EqualTo(3));
+            Assert.That(opening.Ledger.GetChips(C).Committed, Is.EqualTo(2));
+            Assert.That(opening.Ledger.GetChips(A).Stack, Is.EqualTo(97));
+            Assert.That(opening.Ledger.TotalCommitted, Is.EqualTo(8));
+            Assert.That(opening.RefundedAmount, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void NoLimitAnteScheduleUsesCurrentHandWithoutChangingTheOriginalConfig()
+        {
+            var config = new HoldemConfig(100, 1, 2, ante: 1, anteSteps: new long[] { 1, 1, 2, 2, 3 }, turnAccusations: true);
+            Assert.That(config.ForRound(4).Ante, Is.EqualTo(2));
+            Assert.That(config.ForRound(9).Ante, Is.EqualTo(3));
+            Assert.That(config.Ante, Is.EqualTo(1));
+            Assert.That(config.ForRound(4).TurnAccusations, Is.True);
+        }
+
         [Test]
         public void SharedAnteHasNoBlindOrPreflopActorAndDoesNotCountAsStreetPayment()
         {

@@ -8,14 +8,15 @@ namespace Poker.Application
     public sealed class HoldemDealerSelectionFeedback
     {
         internal HoldemDealerSelectionFeedback(Guid handId, Guid dealWindowId, HoldemStreet street,
-            SeatId speaker, string text, bool cardChanged, int? boardIndex = null, Card? appliedCard = null)
+            SeatId speaker, string text, bool cardChanged, int? boardIndex = null, Card? appliedCard = null, string interpretation = null)
         { HandId = handId; DealWindowId = dealWindowId; Street = street; Speaker = speaker;
-            Text = text; CardChanged = cardChanged; BoardIndex = boardIndex; AppliedCard = appliedCard; }
+            Text = text; CardChanged = cardChanged; BoardIndex = boardIndex; AppliedCard = appliedCard; Interpretation = interpretation; }
         public Guid HandId { get; }
         public Guid DealWindowId { get; }
         public HoldemStreet Street { get; }
         public SeatId Speaker { get; }
         public string Text { get; }
+        public string Interpretation { get; }
         // Selection can be accepted even when the requested card was already scheduled.
         public bool CardChanged { get; }
         // Only the committed, already-public card. Never the original card or AI candidate.

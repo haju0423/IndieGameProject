@@ -175,6 +175,9 @@ namespace Poker.Foundation
                 ? BettingRound.BeginSequentialAnte(activeLedger,
                     HoldemSeatOrder.SequentialOrder(active, buttonSeat, _ => true, config.SequentialRules.FirstSeat),
                     config.Ante, config.SequentialRules)
+                : config.Ante > 0
+                ? BettingRound.BeginNoLimitAnte(activeLedger,
+                    HoldemSeatOrder.RotateAfter(active, buttonSeat, _ => true), config.Ante, config.MinimumBet)
                 : BettingRound.BeginOpening(activeLedger, openingOrder,
                     smallBlind, bigBlind, config.SmallBlind, config.BigBlind);
             var started = new HoldemHand(handId, 1, config, active, cards,

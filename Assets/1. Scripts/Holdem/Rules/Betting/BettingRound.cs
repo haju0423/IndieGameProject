@@ -117,6 +117,35 @@ namespace Poker.Foundation
             return round;
         }
 
+        /// <summary>Posts each player's mandatory ante before a no-limit betting round.</summary>
+        public static BettingRound BeginNoLimitAnte(ChipLedger ledger, IReadOnlyList<SeatId> order,
+            long ante, long minimumBet)
+        {
+            if (ante <= 0) throw new ArgumentOutOfRangeException(nameof(ante));
+            if (minimumBet <= 0) throw new ArgumentOutOfRangeException(nameof(minimumBet));
+            Player[] players = CopyPlayers(ledger, order);
+            if (players.Length < 2 || players.Length != ledger.SeatCount || ledger.TotalCommitted != 0)
+                throw new ArgumentException("Ante requires all funded starting seats and no prior contributions.");
+            ChipLedger candidate = ledger;
+            long highest = 0, second = 0;
+            SeatId owner = default;
+            foreach (Player player in players)
+            {
+                long available = ledger.GetChips(player.Seat).Stack;
+                if (available == 0) throw new ArgumentException("Starting seats must have chips.");
+                long paid = Math.Min(ante, available);
+                candidate = candidate.Contribute(player.Seat, paid);
+                if (paid > highest) { second = highest; highest = paid; owner = player.Seat; }
+                else if (paid > second) second = paid;
+            }
+            long unmatched = highest - second;
+            if (unmatched > 0) candidate = candidate.RefundContribution(owner, unmatched);
+            var round = new BettingRound(candidate, players, minimumBet, 0, minimumBet)
+            { PostedAnte = ante, RefundedSeat = unmatched > 0 ? owner : (SeatId?)null, RefundedAmount = unmatched };
+            round.Advance(0);
+            return round;
+        }
+
         /// <summary>
         /// Opens a private, two-stage fixed wager. One shared increment is applied at most once.
         /// The hand-start contribution limit is supplied by the hand, never by a player command.
@@ -371,6 +400,28 @@ namespace Poker.Foundation
             return candidate.Apply(seat, BettingAction.Fold());
         }
 
+        internal BettingRound ResolveAccusation(SeatId accuser, SeatId target, bool hit, long fine)
+        {
+            int actorIndex = FindSeat(accuser), targetIndex = FindSeat(target);
+            if (actorIndex != currentIndex || actorIndex == targetIndex || players[targetIndex].Folded)
+                throw new InvalidOperationException("Invalid accusation turn.");
+            ChipLedger ledger = hit ? Ledger.PayContributionTo(target, accuser) : Ledger.AddDeadMoney(accuser, fine);
+            var next = new BettingRound(ledger, (Player[])players.Clone(), MinimumBet, CurrentBet, LastFullRaise, sequentialRules);
+            if (hit)
+            {
+                next.players[targetIndex].Folded = true;
+                next.players[actorIndex].HasActed = true;
+                next.players[actorIndex].LastFaced = CurrentBet;
+            }
+            else
+            {
+                next.players[actorIndex].Folded = true;
+                next.players[actorIndex].HasActed = true;
+            }
+            next.Advance((actorIndex + 1) % players.Length);
+            return next;
+        }
+
         private void Advance(int firstIndex)
         {
             int solventCount = 0, sole = -1;
@@ -425,12 +476,12 @@ namespace Poker.Foundation
             }
             if (highest > second)
             {
-                if (players[owner].Folded) throw new InvalidOperationException("A folded seat cannot own unmatched excess.");
+                if (players[owner].Folded && Ledger.RemovedContribution(players[owner].Seat) == 0)
+                    throw new InvalidOperationException("A folded seat cannot own unmatched excess.");
                 long refund = checked(highest - second);
-                Ledger = Ledger.RefundContribution(players[owner].Seat, refund);
+                if (!players[owner].Folded) Ledger = Ledger.RefundContribution(players[owner].Seat, refund);
                 players[owner].Paid = second;
-                RefundedSeat = players[owner].Seat;
-                RefundedAmount = refund;
+                if (!players[owner].Folded) { RefundedSeat = players[owner].Seat; RefundedAmount = refund; }
             }
             CurrentBet = Math.Min(highest, second);
             currentIndex = -1;

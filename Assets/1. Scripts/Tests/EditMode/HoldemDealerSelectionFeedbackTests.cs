@@ -10,6 +10,76 @@ namespace Poker.Foundation.Tests
 {
     public sealed partial class HoldemDealerTurnTests
     {
+        [Test]
+        public void RequestCardMarkerRequiresMatchingOwnerHandAndRevealedCard()
+        {
+            var selection = new HoldemDealerSelectionPacket { handId = "hand", speaker = 1,
+                hasAppliedCard = true, boardIndex = 0, card = 10 };
+            var packet = new HoldemRoomPacket { hasGame = true, viewerSeat = 1,
+                game = new HoldemGamePacket { handId = "hand", board = new[] { 10 } },
+                dealerSelections = new[] { selection } };
+            Assert.That(HoldemDealerSelectionPacketReader.FindOwnAppliedCard(packet, 0), Is.SameAs(selection));
+            selection.speaker = 2;
+            Assert.That(HoldemDealerSelectionPacketReader.FindOwnAppliedCard(packet, 0), Is.Null);
+            selection.speaker = 1; selection.handId = "previous hand";
+            Assert.That(HoldemDealerSelectionPacketReader.FindOwnAppliedCard(packet, 0), Is.Null);
+            selection.handId = "hand"; selection.card = 11;
+            Assert.That(HoldemDealerSelectionPacketReader.FindOwnAppliedCard(packet, 0), Is.Null);
+            selection.card = 10; selection.hasAppliedCard = false;
+            Assert.That(HoldemDealerSelectionPacketReader.FindOwnAppliedCard(packet, 0), Is.Null);
+            Assert.That(HoldemDealerSelectionPacketReader.FindOwnAppliedCard(packet, 1), Is.Null);
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void AnteAndAccusationHistoryRoundTripsForClients(bool caught)
+        {
+            Create(config: HoldemLlmTableDealer.CreateConfig(), policy: HoldemLlmTableDealer.CreateUtterancePolicy());
+            Start();
+            Assert.That(State.PotAmount, Is.EqualTo(4));
+            Speak(3, "요청", designate: false);
+            EndBetting();
+            var deal = caught ? SelectSentence() : Read().CreateUnchangedCommand(Guid.NewGuid());
+            Assert.That(room.ApplyDealerDeal(peers[0], deal).Accepted, Is.True);
+            Resume();
+            var before = State;
+            Assert.That(before.CurrentSeat.Value, Is.EqualTo(new SeatId(2)));
+            Assert.That(room.SubmitLegacyTurnAccusation(peers[1], new HoldemRoomLegacyTurnAccusation(
+                before.SessionId, before.HandId, Guid.NewGuid(), before.SessionVersion, new SeatId(3))).Accepted, Is.True);
+            var after = State;
+            Assert.That(after.PotAmount, Is.EqualTo(caught ? 3 : 5));
+            foreach (var peer in peers)
+            {
+                var packet = HoldemRoomPacketMapper.Create(room.Read(peer));
+                Assert.DoesNotThrow(() => HoldemHistoryPacketReader.Read(packet));
+            }
+            for (int i = 0; i < 32 && State.Result == null; i++)
+            {
+                if (State.CurrentSeat.HasValue) Act();
+                else if (State.IsSettlementPending)
+                    Assert.That(room.ResolveSettlement(peers[0], Guid.NewGuid(), State.SessionVersion,
+                        HoldemOddChipRule.ClockwiseFromButton).Accepted, Is.True);
+                else if (State.IsRevealPending) Resume();
+                else if (State.IsDealPending)
+                    Assert.That(room.DealUnchanged(peers[0], Read().CreateUnchangedCommand(Guid.NewGuid())).Accepted, Is.True);
+                else Assert.Fail("Hand cannot advance.");
+                foreach (var peer in peers)
+                {
+                    var packet = HoldemRoomPacketMapper.Create(room.Read(peer));
+                    Assert.DoesNotThrow(() => HoldemHistoryPacketReader.Read(packet));
+                }
+            }
+            Assert.That(State.Result, Is.Not.Null);
+        }
+
+        [Test]
+        public void GameAnteStartsAtOneAndGrowsMoreSlowlyThanFibonacci()
+        {
+            var config = HoldemLlmTableDealer.CreateConfig();
+            CollectionAssert.AreEqual(new long[] { 1, 1, 2, 2, 3, 4, 5, 7, 9, 12 },
+                Enumerable.Range(1, 10).Select(i => config.ForRound(i).Ante));
+        }
+
         private HoldemDealCommand SelectSentence(int card = 45)
         {
             var turn = Read();
@@ -47,8 +117,12 @@ namespace Poker.Foundation.Tests
                 {
                     var packet = FeedbackPacket(i);
                     Assert.That(packet.dealerSelections.Length, Is.EqualTo(i == 1 ? selected : 0));
+                    var marked = HoldemDealerSelectionPacketReader.FindOwnAppliedCard(packet, command.CardChange.BoardIndex);
+                    Assert.That(marked != null, Is.EqualTo(i == 1), "Only the requester can mark this card");
                     if (i == 1)
                     {
+                        foreach (var own in packet.dealerSelections)
+                            Assert.That(HoldemDealerSelectionPacketReader.FindOwnAppliedCard(packet, own.boardIndex), Is.Not.Null);
                         Assert.That(packet.dealerSelections.Last().text, Is.EqualTo(text));
                         Assert.That(packet.dealerSelections.Last().cardChanged, Is.True);
                         Assert.That(packet.dealerSelections.Last().hasAppliedCard, Is.True);
@@ -59,6 +133,8 @@ namespace Poker.Foundation.Tests
                 }
                 Resume();
                 Assert.That(FeedbackPacket(0).dealerSelections, Is.Empty, "Betting after a reveal is still private");
+                Assert.That(HoldemDealerSelectionPacketReader.FindOwnAppliedCard(FeedbackPacket(1),
+                    command.CardChange.BoardIndex), Is.Not.Null, "The requester's marker survives the reveal window");
             }
             EndBetting();
             Assert.That(State.Result, Is.Not.Null);
@@ -66,6 +142,9 @@ namespace Poker.Foundation.Tests
             {
                 var packet = FeedbackPacket(i);
                 Assert.That(packet.dealerSelections.Length, Is.EqualTo(selected));
+                Assert.That(HoldemDealerSelectionPacketReader.FindOwnAppliedCard(packet,
+                    packet.dealerSelections[0].boardIndex) != null, Is.EqualTo(i == 1),
+                    "Public post-hand feedback must not mark another player's card as mine");
                 for (int j = 0; j < selected; j++)
                 {
                     var item = packet.dealerSelections[j];
@@ -204,6 +283,10 @@ namespace Poker.Foundation.Tests
             var legacy = HoldemDealerSelectionPacketReader.Read(packet).Single();
             Assert.That(legacy.AppliedCard, Is.Null);
             Assert.That(legacy.Text, Is.EqualTo("하트 요청"));
+            packet.dealerSelections[0].interpretation = new string('x', 201);
+            Assert.Throws<ArgumentException>(() => HoldemDealerSelectionPacketReader.Read(packet));
+            packet.dealerSelections[0].interpretation = "첫 줄\n둘째 줄";
+            Assert.Throws<ArgumentException>(() => HoldemDealerSelectionPacketReader.Read(packet));
         }
 
         [Test]

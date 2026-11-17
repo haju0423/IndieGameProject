@@ -10,7 +10,7 @@ namespace Poker.Application
     public sealed class HoldemDealerInterpretation
     {
         public HoldemDealerInterpretation(Guid utteranceId, HoldemDealerIntent intent, Rank? rank, Suit? suit,
-            double explicitness, double confidence, HoldemDealerColor? color = null, int? level = null)
+            double explicitness, double confidence, HoldemDealerColor? color = null, int? level = null, string explanation = null)
         {
             if (utteranceId == Guid.Empty) throw new ArgumentException("An utterance ID is required.");
             if (!Enum.IsDefined(typeof(HoldemDealerIntent), intent)) throw new ArgumentOutOfRangeException(nameof(intent));
@@ -28,14 +28,17 @@ namespace Poker.Application
             if (level.HasValue && (level < 0 || level > 4 || explicitness != level.Value / 4.0
                 || (level == 0) != (intent == HoldemDealerIntent.NoRequest)))
                 throw new ArgumentException("Level must match the normalized intent and explicitness.");
+            if (explanation != null && (explanation.Length > 120 || !HoldemPlayerText.IsValidSingleLine(explanation)))
+                throw new ArgumentException("Invalid interpretation explanation.", nameof(explanation));
             UtteranceId = utteranceId; Intent = intent; Rank = rank; Suit = suit;
-            Explicitness = explicitness; Confidence = confidence; Color = color; Level = level;
+            Explicitness = explicitness; Confidence = confidence; Color = color; Level = level; Explanation = explanation;
         }
         public Guid UtteranceId { get; }
         public HoldemDealerIntent Intent { get; }
         public Rank? Rank { get; }
         public Suit? Suit { get; }
         public HoldemDealerColor? Color { get; }
+        public string Explanation { get; }
         /// <summary>Code-calculated 0..4; null only for legacy score fixtures.</summary>
         public int? Level { get; }
         /// <summary>Adapter-normalized 0..1. Neither this value nor Confidence is an application probability.</summary>
@@ -53,7 +56,7 @@ namespace Poker.Application
         internal bool Matches(HoldemDealerInterpretation other) => other != null && UtteranceId == other.UtteranceId
             && Intent == other.Intent && Rank == other.Rank && Suit == other.Suit
             && Explicitness == other.Explicitness && Confidence == other.Confidence
-            && Color == other.Color && Level == other.Level;
+            && Color == other.Color && Level == other.Level && Explanation == other.Explanation;
     }
 
     /// <summary>Complete, immutable host-only interpretation of exactly one closed input batch.</summary>

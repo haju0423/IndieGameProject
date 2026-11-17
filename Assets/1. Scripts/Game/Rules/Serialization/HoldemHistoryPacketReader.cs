@@ -28,7 +28,8 @@ namespace Poker.Application
             foreach (var seat in game.seats) if (seat != null && seat.dealtIn) seats.Add(seat.seat);
             bool shared = game.bettingPolicy == (int)HoldemBettingPolicy.SharedAnteFixed;
             bool sequential = game.bettingPolicy == (int)HoldemBettingPolicy.SharedAnteSequential;
-            bool hasAnte = shared || sequential;
+            bool noLimitAnte = game.bettingPolicy == (int)HoldemBettingPolicy.NoLimit && game.postedAnte > 0;
+            bool hasAnte = shared || sequential || noLimitAnte;
             var roundConfig = hasAnte ? HoldemRoomPacketMapper.ReadRoundConfig(room) : null;
             if (!Enum.IsDefined(typeof(HoldemBettingPolicy), game.bettingPolicy)
                 || hasAnte && (!room.hasRules || room.rules == null || room.rules.bettingPolicy != game.bettingPolicy
@@ -63,7 +64,7 @@ namespace Poker.Application
                 else if (kind == HoldemHistoryKind.Ante)
                 {
                     bool full = entry.amount == game.postedAnte;
-                    bool shortPaid = sequential && roundConfig.SequentialRules.AnteShortfall == ChipShortfallPolicy.PayAvailable
+                    bool shortPaid = (noLimitAnte || sequential && roundConfig.SequentialRules.AnteShortfall == ChipShortfallPolicy.PayAvailable)
                         && entry.amount > 0 && entry.amount < game.postedAnte && entry.allIn;
                     if (!hasAnte || ordinal >= openingCount || entry.seat != anteSeats[(int)ordinal].seat
                         || entry.street != 0 || !(full || shortPaid) || entry.streetTotal != entry.amount
@@ -86,6 +87,11 @@ namespace Poker.Application
                         ? entry.amount <= 0 || entry.amount > roundConfig.FixedBetIncrement || entry.streetTotal < entry.amount
                         : entry.amount != 0 || entry.streetTotal != 0 || entry.allIn) throw Invalid();
                 }
+                else if (kind == HoldemHistoryKind.AccusationPayout || kind == HoldemHistoryKind.AccusationFine)
+                {
+                    if (!noLimitAnte || ordinal < openingCount || entry.street == 0 || entry.amount <= 0
+                        || entry.streetTotal != 0 || entry.allIn || entry.hasAction || entry.action != 0) throw Invalid();
+                }
                 else if (kind == HoldemHistoryKind.UncalledReturn)
                 {
                     if (ordinal < openingCount || entry.amount <= 0 || entry.streetTotal != 0 || entry.allIn || entry.hasAction || entry.action != 0)
@@ -105,7 +111,7 @@ namespace Poker.Application
                 if (kind == HoldemHistoryKind.Action) lastAction = decoded;
                 if (input.omittedCount == 0)
                 {
-                    try { netPaid = checked(netPaid + (kind == HoldemHistoryKind.UncalledReturn ? -entry.amount : entry.amount)); }
+                    try { netPaid = checked(netPaid + (kind == HoldemHistoryKind.UncalledReturn || kind == HoldemHistoryKind.AccusationPayout ? -entry.amount : entry.amount)); }
                     catch (OverflowException) { throw Invalid(); }
                 }
             }

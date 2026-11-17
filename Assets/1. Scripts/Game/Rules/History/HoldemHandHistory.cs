@@ -9,7 +9,7 @@ namespace Poker.Application
         HoldemHandHistory ReadHistory();
     }
 
-    public enum HoldemHistoryKind { SmallBlind, BigBlind, Action, UncalledReturn, Ante, FixedWager, FixedFold, AccusationFold }
+    public enum HoldemHistoryKind { SmallBlind, BigBlind, Action, UncalledReturn, Ante, FixedWager, FixedFold, AccusationFold, AccusationPayout, AccusationFine }
 
     /// <summary>Public chip movements only. No cards, accusation choices or dealer evidence.</summary>
     public sealed class HoldemHistoryEntry

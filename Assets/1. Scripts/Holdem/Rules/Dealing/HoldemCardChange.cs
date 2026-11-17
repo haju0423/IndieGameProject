@@ -12,7 +12,7 @@ namespace Poker.Foundation
     public sealed class HoldemCardChange
     {
         public HoldemCardChange(Guid utteranceWindowId, Guid utteranceId, SeatId speaker,
-            int boardIndex, Card card, HoldemCardSourceScope sourceScope)
+            int boardIndex, Card card, HoldemCardSourceScope sourceScope, string interpretation = null)
         {
             if (utteranceWindowId == Guid.Empty || utteranceId == Guid.Empty)
                 throw new ArgumentException("The source utterance and its window are required.");
@@ -21,8 +21,9 @@ namespace Poker.Foundation
             if (!card.IsValid) throw new ArgumentException("A valid replacement card is required.", nameof(card));
             if (sourceScope != HoldemCardSourceScope.UndealtOutsideCurrentHandRunout)
                 throw new ArgumentOutOfRangeException(nameof(sourceScope));
+            if (interpretation != null && interpretation.Length > 200) throw new ArgumentOutOfRangeException(nameof(interpretation));
             UtteranceWindowId = utteranceWindowId; UtteranceId = utteranceId;
-            Speaker = speaker; BoardIndex = boardIndex; Card = card; SourceScope = sourceScope;
+            Speaker = speaker; BoardIndex = boardIndex; Card = card; SourceScope = sourceScope; Interpretation = interpretation;
         }
         public Guid UtteranceWindowId { get; }
         public Guid UtteranceId { get; }
@@ -30,9 +31,11 @@ namespace Poker.Foundation
         public int BoardIndex { get; }
         public Card Card { get; }
         public HoldemCardSourceScope SourceScope { get; }
+        public string Interpretation { get; }
         internal bool SamePayload(HoldemCardChange other) => other != null
             && UtteranceWindowId == other.UtteranceWindowId && UtteranceId == other.UtteranceId
-            && Speaker == other.Speaker && BoardIndex == other.BoardIndex && Card == other.Card && SourceScope == other.SourceScope;
+            && Speaker == other.Speaker && BoardIndex == other.BoardIndex && Card == other.Card && SourceScope == other.SourceScope
+            && Interpretation == other.Interpretation;
     }
 
     /// <summary>Immutable causal evidence created only by a committed card-changing deal. Host only.</summary>

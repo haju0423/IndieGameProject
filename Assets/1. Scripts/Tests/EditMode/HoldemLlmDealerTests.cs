@@ -11,6 +11,16 @@ namespace Poker.Foundation.Tests
 {
     public sealed partial class HoldemDealerTurnTests
     {
+        [Test]
+        public void InterpretationAdapterKeepsOnlyValidShortAiExplanation()
+        {
+            var result = MentAnalysisResult.Success(new MentAnalysis(MentIntent.CardRequest, Rank.Seven, Suit.Hearts, 4, 4), "{}");
+            Assert.That(HoldemMentInterpreter.ToInterpretation(Guid.NewGuid(), result.WithInterpretation("장미를 하트로 해석")).Explanation,
+                Is.EqualTo("장미를 하트로 해석"));
+            Assert.That(HoldemMentInterpreter.ToInterpretation(Guid.NewGuid(), result.WithInterpretation("잘못된\n해석")).Explanation, Is.Null);
+            Assert.That(HoldemMentInterpreter.ToInterpretation(Guid.NewGuid(), result.WithInterpretation(new string('x', 121))).Explanation, Is.Null);
+        }
+
         private sealed class ScriptedAnalyzer : IMentAnalyzer
         {
             public readonly Dictionary<string, Func<CancellationToken, Task<MentAnalysisResult>>> Replies =

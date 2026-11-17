@@ -137,6 +137,7 @@ namespace Poker.Online
                 // Fusion can destroy its runner object after remote shutdown. Keep the client
                 // and its reconnect identity alive independently of that SDK-owned lifetime.
                 runnerOwner = new GameObject("Fusion runner");
+                DontDestroyOnLoad(runnerOwner);
                 runner = runnerOwner.AddComponent<NetworkRunner>(); runner.ProvideInput = false; runner.AddCallbacks(this);
                 var config = NetworkProjectConfig.Deserialize(NetworkProjectConfig.Serialize(NetworkProjectConfig.Global));
                 config.Network.ReliableDataTransferModes = NetworkConfiguration.ReliableDataTransfers.ClientToServer;

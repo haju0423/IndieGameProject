@@ -6,11 +6,14 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/3. Scenes/play2.unity
-    guid: d2809ab9b90eea7419d8d90d4c505d35
+    path: Assets/3. Scenes/Title.unity
+    guid: 20c19ca95eadebb4a9e1406278e4ef99
   - enabled: 1
-    path: Assets/3. Scenes/LLMTest.unity
-    guid: 99c9720ab356a0642a771bea13969a05
+    path: Assets/3. Scenes/Lobby.unity
+    guid: cafe78914798add49b1570262c088799
+  - enabled: 1
+    path: Assets/3. Scenes/InGame.unity
+    guid: d2809ab9b90eea7419d8d90d4c505d35
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   m_UseUCBPForAssetBundles: 0

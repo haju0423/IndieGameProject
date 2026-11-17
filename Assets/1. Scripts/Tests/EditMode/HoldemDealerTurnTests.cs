@@ -19,11 +19,11 @@ namespace Poker.Foundation.Tests
             public int NextInt(int exclusiveMax) => ++calls % 52 == 0 ? pattern : exclusiveMax - 1;
         }
 
-        private void Create(bool speech = true, bool manual = true, HoldemUtterancePolicy policy = null, int pattern = 3)
+        private void Create(bool speech = true, bool manual = true, HoldemUtterancePolicy policy = null, int pattern = 3, HoldemConfig config = null)
         {
             peers = Enumerable.Range(0, 4).Select(_ => Guid.NewGuid()).ToArray();
             admissions = new HoldemRoomAdmission[4];
-            room = HoldemRoom.Create(Guid.NewGuid(), peers[0], "방장", new HoldemConfig(100, 1, 2,
+            room = HoldemRoom.Create(Guid.NewGuid(), peers[0], "방장", config ?? new HoldemConfig(100, 1, 2,
                 HoldemRevealPolicy.PauseAfterCommunityReveal, dealPolicy: manual ? HoldemDealPolicy.WaitForHost
                     : HoldemDealPolicy.Automatic), new SeatId(1), new StableRandom(pattern), out admissions[0],
                 utterancePolicy: speech ? policy ?? new HoldemUtterancePolicy(128, 2, HoldemUtteranceSeats.Active) : null);

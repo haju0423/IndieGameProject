@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using Poker.Application;
+using Poker.Online;
 
 namespace Poker.Foundation.Tests
 {
@@ -69,6 +70,48 @@ namespace Poker.Foundation.Tests
             Assert.That(room.Read(peers[0]).OwnCardChange, Is.Null);
             Assert.That(coordinator.ReopenRejectedTurn(), Is.False);
             Assert.That(coordinator.TryPostInterpretations(work, Interpret(work)), Is.False);
+        }
+
+        [Test]
+        public void SelectedInterpretationIsPrivateUntilSettlementAndSurvivesSerialization()
+        {
+            Create(policy: HoldemLlmTableDealer.CreateUtterancePolicy()); Start();
+            Speak(2, "빨간 장미", designate: false); EndBetting();
+            var port = CardTestPort();
+            using var coordinator = new HoldemDealerTurnCoordinator(port, SelectTestCard());
+            coordinator.Poll(out var work);
+            var target = work.TargetDeal; var card = Card.FromId(45);
+            var entry = new HoldemDealerInterpretation(work.SourceUtterances.GetEntry(0).CommandId,
+                HoldemDealerIntent.CardPreference, card.Rank, card.Suit, .5, .8, explanation: "장미에서 하트를 연상");
+            var batch = new HoldemDealerInterpretationBatch(target.SessionId, target.HandId, target.WindowId,
+                work.ExpectedVersion, target.Street, work.SourceUtterances.WindowId, new[] { entry });
+            Assert.That(coordinator.TryPostInterpretations(work, batch), Is.True);
+            Assert.That(coordinator.Poll(out _).Accepted, Is.True);
+            var own = FeedbackPacket(1).dealerSelections.Single();
+            Assert.That(own.text, Is.EqualTo("빨간 장미"));
+            Assert.That(own.interpretation, Is.EqualTo("장미에서 하트를 연상"));
+            Assert.That(own.card, Is.EqualTo(45));
+            Assert.That(FeedbackPacket(0).dealerSelections, Is.Empty);
+            Resume();
+            for (int i = 0; i < 32 && State.Result == null; i++)
+            {
+                if (State.CurrentSeat.HasValue) Act();
+                else if (State.IsSettlementPending)
+                    Assert.That(room.ResolveSettlement(peers[0], Guid.NewGuid(), State.SessionVersion,
+                        HoldemOddChipRule.ClockwiseFromButton).Accepted, Is.True);
+                else if (State.IsRevealPending) Resume();
+                else if (State.IsDealPending)
+                    Assert.That(room.DealUnchanged(peers[0], Read().CreateUnchangedCommand(Guid.NewGuid())).Accepted, Is.True);
+                else Assert.Fail("Hand cannot advance.");
+            }
+            Assert.That(State.Result, Is.Not.Null);
+            foreach (int i in Enumerable.Range(0, 4))
+            {
+                var published = FeedbackPacket(i).dealerSelections.Single();
+                Assert.That(published.interpretation, Is.EqualTo(own.interpretation));
+                Assert.That(published.text, Is.EqualTo(own.text));
+                Assert.That(published.card, Is.EqualTo(own.card));
+            }
         }
 
         [TestCase(false)] [TestCase(true)]

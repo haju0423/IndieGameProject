@@ -6,6 +6,19 @@ namespace Poker.Application
 {
     public static class HoldemDealerSelectionPacketReader
     {
+        /// <summary>Returns only the viewer's selection for a matching, already revealed board card.</summary>
+        public static HoldemDealerSelectionPacket FindOwnAppliedCard(HoldemRoomPacket packet, int boardIndex)
+        {
+            var game = packet?.game;
+            if (packet?.hasGame != true || game?.board == null || boardIndex < 0 || boardIndex >= game.board.Length
+                || packet.viewerSeat < 1 || packet.viewerSeat > 4 || packet.dealerSelections == null) return null;
+            foreach (var item in packet.dealerSelections)
+                if (item != null && item.handId == game.handId && item.speaker == packet.viewerSeat
+                    && item.hasAppliedCard && item.boardIndex == boardIndex && item.card == game.board[boardIndex])
+                    return item;
+            return null;
+        }
+
         public static IReadOnlyList<HoldemDealerSelectionFeedback> Read(HoldemRoomPacket packet)
         {
             if (packet == null) throw new ArgumentNullException(nameof(packet));
@@ -27,6 +40,7 @@ namespace Poker.Application
                     || !Id(item.dealWindowId, out var window) || !windows.Add(window)
                     || item.street <= previousStreet || item.street > (int)HoldemStreet.River || item.street > game.street
                     || string.IsNullOrWhiteSpace(item.text) || item.text.Length > 4096 || !HoldemUtteranceInbox.ValidText(item.text)
+                    || item.interpretation != null && (item.interpretation.Length > 200 || !HoldemPlayerText.IsValidSingleLine(item.interpretation))
                     || !game.hasResult && item.speaker != packet.viewerSeat
                     || game.hasResult && game.street != (int)HoldemStreet.Complete
                     || !Array.Exists(packet.members, m => m != null && m.seat == item.speaker)) throw Invalid();
@@ -41,7 +55,7 @@ namespace Poker.Application
                 result[i] = new HoldemDealerSelectionFeedback(hand, window, (HoldemStreet)item.street,
                     new SeatId(item.speaker), item.text, item.cardChanged,
                     item.hasAppliedCard ? (int?)item.boardIndex : null,
-                    item.hasAppliedCard ? (Card?)Card.FromId(item.card) : null);
+                    item.hasAppliedCard ? (Card?)Card.FromId(item.card) : null, item.interpretation);
             }
             return Array.AsReadOnly(result);
         }
