@@ -86,12 +86,25 @@ namespace Poker.Application
                             source = work.SourceUtterances.GetEntry(i);
                     if (source == null) throw new InvalidOperationException("Selected utterance is absent from the input.");
                     change = new HoldemCardChange(source.WindowId, source.CommandId, source.Speaker,
-                        decision.BoardIndex, decision.Card, decision.SourceScope);
+                        decision.BoardIndex, decision.Card, decision.SourceScope, DescribeInterpretation(interpreted));
                 }
             }
             var deal = work.TargetDeal;
             return new HoldemDealCommand(deal.SessionId, deal.HandId, deal.WindowId, Guid.NewGuid(),
                 work.ExpectedVersion, deal.Street, change);
+        }
+
+        private static string DescribeInterpretation(HoldemDealerInterpretation interpreted)
+        {
+            string target = interpreted.Rank.HasValue ? interpreted.Rank.Value.ToString() : "";
+            if (interpreted.Suit.HasValue)
+            {
+                var suit = interpreted.Suit.Value;
+                target += (target.Length > 0 ? " · " : "") + (suit == Suit.Hearts ? "하트" : suit == Suit.Diamonds ? "다이아"
+                    : suit == Suit.Clubs ? "클로버" : "스페이드");
+            }
+            if (interpreted.Color.HasValue) target += interpreted.Color == HoldemDealerColor.Red ? "빨간색" : "검은색";
+            return string.IsNullOrWhiteSpace(interpreted.Explanation) ? $"결론: {target}" : interpreted.Explanation;
         }
 
         private TimeSpan? ReadClock()

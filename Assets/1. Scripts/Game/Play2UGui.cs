@@ -7,6 +7,15 @@ internal static class Play2UGui
     internal static readonly Color Cream = Hex("F6F0E2"), Ink = Hex("1A1A1A"), Orange = Hex("E8833A"),
         Red = Hex("B3261E"), Dark = Hex("101B16");
 
+    internal static readonly Color Pine = Hex("10251BEC"), PineInset = Hex("31493CBE"),
+        Trim = Hex("BFA77C88"), Gold = Hex("F2CD8B"), Coral = Hex("F18673"), Accent = Hex("D54B40");
+    internal const float HudMargin = 14f;
+    internal const float SidePanelTop = 70f;
+    internal const float SidePanelWidth = 258f;
+    internal const float SidePanelMargin = 8f;
+    internal const float ActionAreaHeight = 161f;
+    internal const float HandSummaryHeight = 88f;
+
     internal static Color Hex(string value)
     {
         ColorUtility.TryParseHtmlString("#" + value, out var color);
@@ -22,6 +31,13 @@ internal static class Play2UGui
         rect.anchoredPosition = position;
         rect.sizeDelta = size;
         return rect;
+    }
+
+    internal static void Anchor(RectTransform rect, Vector2 anchor)
+    {
+        var position = rect.anchoredPosition;
+        rect.anchorMin = rect.anchorMax = rect.pivot = anchor;
+        rect.anchoredPosition = position;
     }
 
     internal static RectTransform Fill(string name, Transform parent)
@@ -45,6 +61,59 @@ internal static class Play2UGui
     {
         var rect = Rect(name, parent, position, size);
         Image(rect, color, raycast);
+        return rect;
+    }
+
+    internal static RectTransform Frame(string name, Transform parent, Vector2 position, Vector2 size, Texture2D felt)
+    {
+        var rect = Panel(name, parent, position, size, Pine);
+        ApplyFrame(rect.GetComponent<UnityEngine.UI.Image>(), felt);
+        return rect;
+    }
+
+    internal static void ApplyFrame(UnityEngine.UI.Graphic image, Texture2D felt)
+    {
+        var parent = image.rectTransform;
+        image.color = felt != null ? new Color(Pine.r, Pine.g, Pine.b, .46f) : Pine;
+        if (felt != null)
+        {
+            var surface = Fill("Felt Surface", parent);
+            surface.SetAsFirstSibling();
+            var texture = surface.gameObject.AddComponent<UnityEngine.UI.RawImage>();
+            texture.texture = felt;
+            texture.color = new Color(1, 1, 1, .95f);
+            texture.raycastTarget = false;
+        }
+        AddFrameEdge("Top Edge", parent, Vector2.up, Vector2.one, new Vector2(0, -1), Vector2.zero);
+        AddFrameEdge("Bottom Edge", parent, Vector2.zero, Vector2.right, Vector2.zero, new Vector2(0, 1));
+        AddFrameEdge("Left Edge", parent, Vector2.zero, Vector2.up, new Vector2(0, 1), new Vector2(1, -1));
+        AddFrameEdge("Right Edge", parent, Vector2.right, Vector2.one, new Vector2(-1, 1), new Vector2(0, -1));
+    }
+
+    private static void AddFrameEdge(string name, RectTransform parent, Vector2 anchorMin, Vector2 anchorMax,
+        Vector2 offsetMin, Vector2 offsetMax)
+    {
+        var edge = Panel(name, parent, Vector2.zero, Vector2.zero, Trim);
+        edge.anchorMin = anchorMin;
+        edge.anchorMax = anchorMax;
+        edge.offsetMin = offsetMin;
+        edge.offsetMax = offsetMax;
+    }
+
+    internal static RectTransform Paper(string name, Transform parent, Vector2 position, Vector2 size, Texture2D texture, Color? tint = null)
+    {
+        var rect = Rect(name, parent, position, size);
+        var image = rect.gameObject.AddComponent<UnityEngine.UI.RawImage>();
+        image.texture = texture;
+        image.color = tint ?? Cream;
+        image.raycastTarget = false;
+        return rect;
+    }
+
+    internal static RectTransform Diamond(string name, Transform parent, Vector2 position, Color color)
+    {
+        var rect = Panel(name, parent, position, new Vector2(7, 7), color);
+        rect.localRotation = Quaternion.Euler(0, 0, 45);
         return rect;
     }
 

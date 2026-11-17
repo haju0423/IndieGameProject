@@ -85,8 +85,12 @@ namespace Poker.Llm
             if (!result.IsValid || result.Analysis.Intent != MentIntent.CardRequest)
                 return new HoldemDealerInterpretation(utteranceId, HoldemDealerIntent.NoRequest, null, null, 0, 0);
             var analysis = result.Analysis;
+            var explanation = result.Interpretation;
+            if (string.IsNullOrWhiteSpace(explanation) || explanation.Length > 120
+                || !HoldemPlayerText.IsValidSingleLine(explanation)) explanation = null;
             return new HoldemDealerInterpretation(utteranceId, HoldemDealerIntent.CardPreference, analysis.Rank, analysis.Suit,
-                (double)analysis.Explicitness / MentAnalysis.MaxLevel, (double)analysis.Confidence / MentAnalysis.MaxLevel);
+                (double)analysis.Explicitness / MentAnalysis.MaxLevel, (double)analysis.Confidence / MentAnalysis.MaxLevel,
+                explanation: explanation);
         }
 
         // Failures are recorded as results; nothing escapes to stop the deal.

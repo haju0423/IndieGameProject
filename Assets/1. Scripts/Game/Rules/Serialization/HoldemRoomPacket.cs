@@ -57,7 +57,7 @@ namespace Poker.Application
     [Serializable]
     public sealed class HoldemDealerSelectionPacket
     {
-        public string handId, dealWindowId, text;
+        public string handId, dealWindowId, text, interpretation;
         public int street, speaker;
         public bool cardChanged;
         // Optional for older protocol-1 senders. Refers only to an already-revealed board card.
@@ -451,7 +451,7 @@ namespace Poker.Application
                 packet.dealerSelections[i] = new HoldemDealerSelectionPacket {
                     handId = selected.HandId.ToString("N"), dealWindowId = selected.DealWindowId.ToString("N"),
                     street = (int)selected.Street, speaker = selected.Speaker.Value,
-                    text = selected.Text, cardChanged = selected.CardChanged,
+                    text = selected.Text, interpretation = selected.Interpretation, cardChanged = selected.CardChanged,
                     hasAppliedCard = selected.AppliedCard.HasValue,
                     boardIndex = selected.BoardIndex ?? 0, card = selected.AppliedCard?.Id ?? 0 };
             }

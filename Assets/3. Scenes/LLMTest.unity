@@ -480,8 +480,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::LlmUnityMentAnalyzer
   agent: {fileID: 576020466}
   interpreterAgent: {fileID: 576020469}
-  timeoutSeconds: 5
-  interpreterTimeoutSeconds: 4
+  timeoutSeconds: 10
+  interpreterTimeoutSeconds: 9
   interpreterMaxTokens: 80
   warmupOnStart: 1
 --- !u!114 &576020466
@@ -557,7 +557,7 @@ MonoBehaviour:
   _reasoning: 0
   _lora: 
   _loraWeights: 
-  dontDestroyOnLoad: 1
+  dontDestroyOnLoad: 0
   _embeddingsOnly: 0
   _embeddingLength: 2560
   minContextLength: 0

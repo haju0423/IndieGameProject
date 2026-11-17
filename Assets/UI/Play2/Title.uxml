@@ -1,0 +1,40 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:Style src="Title.uss" />
+    <ui:VisualElement class="title-shell" picking-mode="Ignore">
+        <ui:VisualElement name="scrim" class="title-scrim" picking-mode="Ignore" />
+        <ui:VisualElement name="menu" class="title-menu" picking-mode="Ignore">
+            <ui:VisualElement class="title-logo" tooltip="One More Card" picking-mode="Ignore" />
+            <ui:Button name="host" text="방 만들기" class="menu-button featured" />
+            <ui:Button name="join" text="방 참여" class="menu-button" />
+            <ui:Button name="settings" text="설정" class="menu-button" />
+            <ui:Button name="quit" text="게임 종료" class="menu-button quiet" />
+            <ui:Button name="local" text="로컬 프리뷰" class="menu-button preview" />
+            <ui:Label name="notice" class="title-notice" picking-mode="Ignore" />
+        </ui:VisualElement>
+        <ui:VisualElement name="form" class="title-modal title-hidden">
+            <ui:VisualElement class="title-dialog">
+                <ui:VisualElement class="dialog-heading">
+                    <ui:Label name="form-title" class="dialog-title" />
+                    <ui:Label text="◆" class="dialog-mark" />
+                </ui:VisualElement>
+                <ui:VisualElement name="room-fields">
+                    <ui:TextField name="nickname" label="닉네임" maxlength="20" />
+                    <ui:TextField name="room-code" label="방 코드" maxlength="24" />
+                    <ui:DropdownField name="capacity" label="방 인원" />
+                </ui:VisualElement>
+                <ui:VisualElement name="settings-fields" class="title-hidden">
+                    <ui:VisualElement class="volume-row">
+                        <ui:Slider name="master-volume" label="전체 음량" low-value="0" high-value="1" />
+                        <ui:Label name="volume-value" class="volume-value" />
+                    </ui:VisualElement>
+                    <ui:Toggle name="fullscreen" label="전체 화면" />
+                </ui:VisualElement>
+                <ui:Label name="form-detail" class="dialog-detail" />
+                <ui:VisualElement class="dialog-actions">
+                    <ui:Button name="cancel" text="뒤로" class="dialog-button" />
+                    <ui:Button name="confirm" class="dialog-button dialog-confirm" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

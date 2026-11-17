@@ -1,7 +1,7 @@
 {
   "name": "Poker.Llm.Unity",
   "rootNamespace": "Poker.Llm.Unity",
-  "references": ["Poker.Llm", "undream.llmunity.Runtime"],
+  "references": ["Poker.Core", "Poker.Llm", "undream.llmunity.Runtime"],
   "autoReferenced": true,
   "defineConstraints": ["OMC_LLMUNITY"],
   "versionDefines": [

@@ -23,7 +23,10 @@ public class LlmUnityMentAnalyzer : MonoBehaviour, IMentAnalyzer
     private readonly SemaphoreSlim _gate = new SemaphoreSlim(1, 1);
     private readonly SemaphoreSlim _interpreterGate = new SemaphoreSlim(1, 1);
 
-    public bool IsReady => IsAgentReady(agent);
+    private CancellationTokenSource lifetime;
+    private Task warmup;
+
+    public bool IsReady => lifetime != null && warmup?.IsCompleted == true && IsAgentReady(agent);
 
     private bool UsesInterpreter => interpreterAgent != null && interpreterAgent != agent;
 
@@ -35,6 +38,7 @@ public class LlmUnityMentAnalyzer : MonoBehaviour, IMentAnalyzer
             return;
         }
 
+        agent.slot = 0;
         agent.systemPrompt = MentAnalysisPrompt.SystemPrompt;
         agent.grammar = MentAnalysisPrompt.JsonSchema;
         agent.temperature = 0f;
@@ -47,6 +51,7 @@ public class LlmUnityMentAnalyzer : MonoBehaviour, IMentAnalyzer
         }
         if (!UsesInterpreter) return;
 
+        interpreterAgent.slot = interpreterAgent.llm == agent.llm ? 1 : 0;
         interpreterAgent.systemPrompt = MentAnalysisPrompt.InterpreterSystemPrompt;
         interpreterAgent.grammar = "";
         interpreterAgent.temperature = 0f;
@@ -54,18 +59,52 @@ public class LlmUnityMentAnalyzer : MonoBehaviour, IMentAnalyzer
         interpreterAgent.save = "";
     }
 
-    private async void Start()
+    private void OnEnable()
     {
-        if (agent == null || !warmupOnStart) return;
+        lifetime = new CancellationTokenSource();
+        warmup = warmupOnStart && agent != null ? WarmupAsync(lifetime.Token) : Task.CompletedTask;
+    }
 
+    private void OnDisable()
+    {
+        var stop = lifetime;
+        lifetime = null;
+        if (stop == null) return;
+
+        // Cancel on Unity's thread while the service still exists. No blocking join during teardown.
         try
         {
-            if (UsesInterpreter) await Task.WhenAll(agent.Warmup(), interpreterAgent.Warmup());
-            else await agent.Warmup();
+            if (_gate.CurrentCount == 0 && IsAgentReady(agent)) agent.CancelRequests();
+            if (_interpreterGate.CurrentCount == 0 && IsAgentReady(interpreterAgent)) interpreterAgent.CancelRequests();
         }
+        finally
+        {
+            stop.Cancel();
+            stop.Dispose();
+        }
+    }
+
+    private async Task WarmupAsync(CancellationToken token)
+    {
+        try
+        {
+            while (!IsAgentReady(agent))
+            {
+                if (agent == null || agent.llm == null || agent.llm.failed) return;
+                await Task.Delay(50, token);
+            }
+
+            if (UsesInterpreter && IsAgentReady(interpreterAgent))
+                await Task.WhenAll(
+                    ChatAsync(agent, _gate, null, timeoutSeconds, token, warmup: true),
+                    ChatAsync(interpreterAgent, _interpreterGate, null, interpreterTimeoutSeconds, token, warmup: true));
+            else
+                await ChatAsync(agent, _gate, null, timeoutSeconds, token, warmup: true);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception ex)
         {
-            Debug.LogError($"[{nameof(LlmUnityMentAnalyzer)}] Warmup failed: {ex.Message}", this);
+            Debug.LogWarning($"[{nameof(LlmUnityMentAnalyzer)}] Warmup skipped: {ex.Message}", this);
         }
     }
 
@@ -73,6 +112,9 @@ public class LlmUnityMentAnalyzer : MonoBehaviour, IMentAnalyzer
     {
         if (string.IsNullOrWhiteSpace(ment)) return MentAnalysisResult.Success(MentAnalysis.NoIntent, null);
         if (agent == null) return MentAnalysisResult.Unavailable("LLMAgent is not assigned.");
+        if (lifetime == null) return MentAnalysisResult.Cancelled();
+        using var request = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.Token);
+        cancellationToken = request.Token;
 
         string interpretation;
         try
@@ -138,33 +180,53 @@ public class LlmUnityMentAnalyzer : MonoBehaviour, IMentAnalyzer
             : MentAnalysisResult.InvalidResponse(error, raw);
     }
 
-    // 타임아웃은 대기열을 통과해 실제 요청을 보낸 뒤부터 잰다. 대기열 대기는 호출자 토큰으로만 끊는다.
+    // Start the timeout after acquiring the agent, and keep the slot reserved until native work exits.
     private static async Task<string> ChatAsync(LLMAgent target, SemaphoreSlim gate, string message,
-        float timeoutSeconds, CancellationToken cancellationToken)
+        float timeoutSeconds, CancellationToken cancellationToken, bool warmup = false)
     {
         await gate.WaitAsync(cancellationToken);
+        Task<string> chat = null;
+        int originalNumPredict = target.numPredict;
         try
         {
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+            cancellationToken.ThrowIfCancellationRequested();
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+            if (warmup) target.numPredict = 0;
+            chat = target.Chat(message, null, null, false);
+            Task deadline = Task.Delay(Timeout.Infinite, timeout.Token);
 
-            Task<string> chat = target.Chat(message, null, null, false);
-            Task deadline = Task.Delay(Timeout.Infinite, timeoutCts.Token);
-
-            if (await Task.WhenAny(chat, deadline) != chat)
+            if (await Task.WhenAny(chat, deadline) == chat)
             {
-                target.CancelRequests();
-                await IgnoreFailure(chat);
                 cancellationToken.ThrowIfCancellationRequested();
-                throw new TimeoutException($"{target.name} timed out.");
+                return await chat;
             }
 
-            return await chat;
+            // OnDisable cancels native requests before cancelling its lifetime token.
+            if (IsAgentReady(target) && target.isActiveAndEnabled) target.CancelRequests();
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new TimeoutException($"{target.name} timed out.");
         }
         finally
         {
-            gate.Release();
+            if (warmup) target.numPredict = originalNumPredict;
+            if (chat == null || chat.IsCompleted)
+            {
+                if (chat != null && chat.IsFaulted) _ = chat.Exception;
+                gate.Release();
+            }
+            else
+            {
+                _ = ReleaseWhenFinishedAsync(chat, gate);
+            }
         }
+    }
+
+    private static async Task ReleaseWhenFinishedAsync(Task chat, SemaphoreSlim gate)
+    {
+        try { await chat.ConfigureAwait(false); }
+        catch (Exception) { /* The caller has already received the timeout or cancellation. */ }
+        finally { gate.Release(); }
     }
 
     private static string CleanInterpretation(string reply)
@@ -186,14 +248,4 @@ public class LlmUnityMentAnalyzer : MonoBehaviour, IMentAnalyzer
     private static bool IsAgentReady(LLMAgent target) =>
         target != null && target.llm != null && target.llm.started && !target.llm.failed;
 
-    private static async Task IgnoreFailure(Task task)
-    {
-        try
-        {
-            await task;
-        }
-        catch (Exception)
-        {
-        }
-    }
 }

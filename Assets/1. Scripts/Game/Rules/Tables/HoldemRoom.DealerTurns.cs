@@ -38,7 +38,8 @@ namespace Poker.Application
                     var revealed = session.GetSnapshot(source.Speaker).GetBoardCard(index);
                     dealerSelections.Add(new HoldemDealerSelectionFeedback(command.HandId, command.WindowId,
                         command.Street, source.Speaker, source.Text, changed?.DealWindowId == command.WindowId,
-                        index, revealed));
+                        index, revealed, HoldemPlayerText.IsValidSingleLine(command.CardChange.Interpretation)
+                            ? command.CardChange.Interpretation : null));
                 }
                 return receipt;
             });
