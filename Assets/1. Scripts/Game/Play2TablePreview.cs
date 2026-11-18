@@ -19,6 +19,10 @@ public sealed class Play2TablePreview : MonoBehaviour
     internal int HighlightSeat => HighlightSeats.Length == 0 ? 0 : HighlightSeats[0];
     private Play2SettlementSummary.ShowdownAward[] awards = Array.Empty<Play2SettlementSummary.ShowdownAward>();
     private Play2ShowdownCards showdownCards;
+    // Includes the time it takes to lay the cards down. Leave the final hand in view before announcing the pot.
+    private const float ShowdownLeadIn = .35f;
+    private const float BetweenHandReveals = 1.35f;
+    private const float LastHandReadTime = 1.65f;
     private float beatUntil;
     private int[] revealOrder = Array.Empty<int>();
     private int openedHands;
@@ -225,6 +229,7 @@ public sealed class Play2TablePreview : MonoBehaviour
         else if (!sameHand || !previous.game.hasResult)
         {
             Showdown = sameHand ? ShowdownBeat.Waiting : ShowdownBeat.Finished;
+            beatUntil = Time.unscaledTime + ShowdownLeadIn;
             awards = Play2SettlementSummary.ShowdownAwards(game);
             revealOrder = Play2SettlementSummary.RevealOrder(packet);
             openedHands = sameHand ? 0 : revealOrder.Length;
@@ -287,7 +292,12 @@ public sealed class Play2TablePreview : MonoBehaviour
         switch (Showdown)
         {
             case ShowdownBeat.Waiting:
-                if (IsDealing || IsBetting) return;
+                if (IsDealing || IsBetting)
+                {
+                    beatUntil = Time.unscaledTime + ShowdownLeadIn;
+                    return;
+                }
+                if (Time.unscaledTime < beatUntil) return;
                 Showdown = ShowdownBeat.Reveal;
                 RevealNextHand();
                 break;
@@ -326,7 +336,7 @@ public sealed class Play2TablePreview : MonoBehaviour
         var seat = state.game.seats.First(s => s.seat == next);
         grips[next - 1]?.Reveal(seat.visibleCards[0], seat.visibleCards[1]);
         tableAudio.CardSlide();
-        beatUntil = Time.unscaledTime + .90f;
+        beatUntil = Time.unscaledTime + (openedHands == revealOrder.Length ? LastHandReadTime : BetweenHandReveals);
     }
 
     private void LiftWinningCards()
