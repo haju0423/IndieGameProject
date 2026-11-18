@@ -29,7 +29,9 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     private UnityEngine.UI.Outline inputFocus;
     private GameObject closeHint;
     private long firstMessage = -1, lastMessage = -1;
-    private bool expanded, recordsOpen, focusRequested;
+    private bool composing, recordsOpen, focusRequested;
+    private int requestedEditFrame = -1;
+    private int releasedFocusFrame = -1;
     private InputAction openChat;
     private TMP_Text historyLabel;
     private TMP_Text requestHint, sendLabel, dealerLabel;
@@ -43,7 +45,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     private int visibleRecords = -1;
     private readonly List<(int street, int accuser, int target, bool caught)> verdicts = new();
     internal TMPro.TMP_FontAsset Font => messages.font;
-    internal bool IsTyping => panel.activeInHierarchy && (expanded || input.isFocused);
+    internal bool IsTyping => panel.activeInHierarchy && (input.isFocused || requestedEditFrame == Time.frameCount);
 
     internal void Initialize(Play2TablePreview owner)
     {
@@ -66,7 +68,12 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         input.onSelect.AddListener(_ =>
         {
             if (recordsOpen) ToggleHistory();
-            SetExpanded(true);
+            requestedEditFrame = Time.frameCount;
+        });
+        input.onDeselect.AddListener(_ =>
+        {
+            releasedFocusFrame = Time.frameCount;
+            requestedEditFrame = -1;
         });
         input.onSubmit.AddListener(_ => Send());
         dealer.onValueChanged.AddListener(_ => RefreshComposer());
@@ -190,7 +197,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         if (recordsOpen) ToggleHistory();
         input.Select();
         input.ActivateInputField();
-        SetExpanded(true);
+        requestedEditFrame = Time.frameCount;
         return true;
     }
 
@@ -215,8 +222,11 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         if (packet?.hasGame != true) return;
         if (!recordsOpen) savedChatOffset = scroll.verticalNormalizedPosition <= .02f ? -1 : scroll.content.anchoredPosition.y;
         recordsOpen = !recordsOpen;
-        if (recordsOpen) { input.DeactivateInputField(); SetExpanded(true); }
-        ApplyLayout();
+        if (recordsOpen)
+        {
+            input.DeactivateInputField();
+            requestedEditFrame = -1;
+        }
         firstMessage = lastMessage = -2;
         visibleRecords = -1;
         RefreshRows(true);
@@ -225,6 +235,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (composing != IsTyping) SetComposing(IsTyping);
         if (dealerReceiptUntil > 0 && Time.unscaledTime >= dealerReceiptUntil)
         {
             dealerReceiptUntil = 0;
@@ -235,7 +246,12 @@ public sealed class Play2ChatCanvas : MonoBehaviour
             ApplyLayout();
             RestoreScroll(scroll.verticalNormalizedPosition > .01f, scroll.content.anchoredPosition.y);
         }
-        if (!IsTyping) return;
+    }
+
+    internal bool CaptureTableInput()
+    {
+        // TMP can finish editing before the table processes the same Escape or click.
+        if (!panel.activeInHierarchy || (!recordsOpen && !IsTyping && !composing && releasedFocusFrame != Time.frameCount)) return false;
         var keyboard = Keyboard.current;
         var mouse = Mouse.current;
         bool clickedOutside = mouse != null && mouse.leftButton.wasPressedThisFrame
@@ -248,18 +264,18 @@ public sealed class Play2ChatCanvas : MonoBehaviour
                 events.SetSelectedGameObject(null);
             input.DeactivateInputField();
             if (recordsOpen) ToggleHistory();
-            SetExpanded(false);
+            requestedEditFrame = -1;
         }
+        return true;
     }
 
-    private void SetExpanded(bool value)
+    private void SetComposing(bool value)
     {
-        if (expanded == value) return;
-        bool keepScroll = value && scroll.verticalNormalizedPosition > .01f;
-        float offset = scroll.content.anchoredPosition.y;
-        expanded = value;
-        ApplyLayout();
-        RestoreScroll(keepScroll, offset);
+        composing = value;
+        closeHint.SetActive(value);
+        inputFocus.enabled = value;
+        if (inputBackground != null)
+            inputBackground.color = value ? Play2UGui.Hex("24383B") : Play2UGui.Hex("0E191C");
     }
 
     private void ApplyLayout()
@@ -271,11 +287,8 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         layoutCanvasHeight = ((RectTransform)panelRect.parent).rect.height;
         scrollRect.offsetMin = new Vector2(12, 87);
         scrollRect.offsetMax = new Vector2(-23, -38);
-        closeHint.SetActive(expanded);
-        inputFocus.enabled = expanded;
+        SetComposing(composing);
         scrollbarRail.gameObject.SetActive(true);
-        if (inputBackground != null)
-            inputBackground.color = expanded ? Play2UGui.Hex("24383B") : Play2UGui.Hex("0E191C");
     }
 
     private void RestoreScroll(bool keepOffset, float offset)
@@ -310,7 +323,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
             foreach (var row in rows) row.root.gameObject.SetActive(false);
             input.SetTextWithoutNotify("");
             dealer.SetIsOnWithoutNotify(false);
-            SetExpanded(false);
+            SetComposing(false);
             return;
         }
 
@@ -465,7 +478,8 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         pendingId = pendingText = null;
         deliveryUnconfirmed = false;
         RefreshComposer();
-        if (expanded && !recordsOpen) input.ActivateInputField();
+        if (!recordsOpen && EventSystem.current?.currentSelectedGameObject == input.gameObject)
+            input.ActivateInputField();
     }
 
     private void RefreshComposer()

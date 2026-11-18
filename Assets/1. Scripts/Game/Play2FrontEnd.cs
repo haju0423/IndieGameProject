@@ -11,6 +11,7 @@ public sealed class Play2FrontEnd : MonoBehaviour
     private Play2TablePreview table;
     internal RectTransform HudRoot { get; private set; }
     internal TMP_FontAsset Font => chatCanvas.Font;
+    internal bool CaptureChatInput() => chatCanvas.CaptureTableInput();
 
     public void Initialize(Play2TablePreview table)
     {
@@ -48,9 +49,9 @@ public sealed class Play2FrontEnd : MonoBehaviour
         }
         hud.Present(packet, status);
         chatCanvas.Present(packet);
-        hud.TickPracticeAdvance(chatCanvas.IsTyping || blockActions);
         if (!hud.CanOpenChat) chatCanvas.DiscardFocusRequest();
         else if (chatCanvas.HandleEnter()) return;
+        hud.TickPracticeAdvance(chatCanvas.IsTyping || blockActions);
         hud.HandleKeys(chatCanvas.IsTyping || blockActions);
     }
 }

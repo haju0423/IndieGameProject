@@ -184,10 +184,11 @@ public sealed class Play2TablePreview : MonoBehaviour
         AdvanceShowdown();
         if (!IsDealing && Time.time >= nextPreviewAction && session.PlayPreviewOpponent())
             nextPreviewAction = Time.time + 0.65f;
-        bool reactionOpen = reactions.HandlePointer();
-        frontEnd.Present(state, session.Status, reactionOpen);
+        bool chatHasInput = frontEnd.CaptureChatInput();
+        bool reactionOpen = !chatHasInput && reactions.HandlePointer();
+        frontEnd.Present(state, session.Status, chatHasInput || reactionOpen);
         var mouse = UnityEngine.InputSystem.Mouse.current;
-        if (!IsDealing && state?.game?.hasResult != true && mouse?.leftButton.wasPressedThisFrame == true
+        if (!chatHasInput && !IsDealing && state?.game?.hasResult != true && mouse?.leftButton.wasPressedThisFrame == true
             && UnityEngine.EventSystems.EventSystem.current?.IsPointerOverGameObject() != true
             && seatCamera.pixelRect.Contains(mouse.position.ReadValue())
             && viewer > 0 && grips[viewer - 1] != null && grips[viewer - 1].Contains(mouse.position.ReadValue(), seatCamera))
