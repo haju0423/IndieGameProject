@@ -161,6 +161,7 @@ public sealed class Play2TablePreview : MonoBehaviour
     internal bool ActionPending => session != null && session.ActionPending;
     internal bool IsDealing => Time.time < animationUntil;
     internal bool IsBetting => chips.IsAnimating;
+    internal void ShowPayout(int seat, long amount, bool animate) => chips.ShowPayout(seat, amount, animate);
     internal void PlayTurnSound() => tableAudio.YourTurn();
     internal void PlayResultSound() => tableAudio.HandEnd();
     internal void PlayAccusationSound(bool caught) => tableAudio.Accusation(caught);

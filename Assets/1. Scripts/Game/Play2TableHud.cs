@@ -104,6 +104,8 @@ internal sealed partial class Play2TableHud
             seatStates[i] = Play2UGui.Text("Seat State", plate, "", new Vector2(0, -19), new Vector2(136, 17), 14,
                 Play2UGui.Gold, font);
             seatStates[i].richText = false;
+            seatStates[i].textWrappingMode = TextWrappingModes.NoWrap;
+            Play2HudArt.Fit(seatStates[i], 11);
         }
 
         var noticePanel = Play2HudArt.Plate("Action Notice", root, new Vector2(0, -85), new Vector2(600, 50), "CreamPanel");
@@ -242,7 +244,7 @@ internal sealed partial class Play2TableHud
         else if (showingAwards)
         {
             var paid = game.seats.FirstOrDefault(seat => seat.seat == table.HighlightSeat);
-            showdownTitle.text = paid == null ? "쇼다운" : Play2HandGuide.CategoryLabel(Play2SettlementSummary.Value(paid));
+            showdownTitle.text = paid == null ? "쇼다운" : Play2SettlementSummary.HandName(Play2SettlementSummary.Value(paid));
             var award = table.CurrentAward;
             showdownDetail.text = award == null ? "" : award.Caption(game, DisplayName);
         }
@@ -254,7 +256,9 @@ internal sealed partial class Play2TableHud
         }
         street.gameObject.SetActive(game.board.Length == 0 && !game.hasResult);
         street.text = $"입장료 {game.postedAnte}칩";
-        potAndAnte.text = $"팟  {game.pot}칩";
+        long paidTotal = 0;
+        bool continuedHand = previous != null && previous.handId == game.handId && previousPacket.sessionId == packet.sessionId
+            && previousPacket.viewerSeat == packet.viewerSeat;
         for (int i = 0; i < seatLabels.Length; i++)
         {
             var seat = game.seats.FirstOrDefault(s => s.seat == i + 1);
@@ -262,6 +266,9 @@ internal sealed partial class Play2TableHud
             if (seat == null) continue;
             long displayedAward = showingAwards && table.CurrentAward != null
                 ? table.CurrentAward.PayoutThroughThisPot(game, seat.seat) : awaitingWinner ? 0L : seat.awarded;
+            paidTotal += displayedAward;
+            if (displayedAward > 0)
+                table.ShowPayout(seat.seat, displayedAward, continuedHand);
             long shownStack = seat.stack - seat.awarded + displayedAward;
             seatLabels[i].text = seat.viewer ? "" : Name(seat.seat);
             seatStacks[i].text = seat.viewer ? $"내 칩  {shownStack}" : $"{shownStack}칩";
@@ -273,7 +280,7 @@ internal sealed partial class Play2TableHud
             if (game.hasResult && table.IsHandShown(seat.seat) && !seat.viewer && seat.revealedBestCards?.Length == 5)
             {
                 var valueOfHand = HandEvaluator.Evaluate(seat.revealedBestCards.Select(Poker.Foundation.Card.FromId).ToArray());
-                seatStates[i].text = Play2HandGuide.CategoryLabel(valueOfHand);
+                seatStates[i].text = Play2SettlementSummary.HandName(valueOfHand);
             }
             bool won = game.hasResult && displayedAward > 0;
             if (won) seatStates[i].text = (string.IsNullOrEmpty(seatStates[i].text) ? "승리" : seatStates[i].text)
@@ -292,6 +299,8 @@ internal sealed partial class Play2TableHud
             seatLabels[i].color = hasTurn || won ? Play2UGui.Gold : Play2UGui.Cream;
             if (hasTurn && !seat.viewer) seatStates[i].text = "차례" + (seat.streetContribution > 0 ? $"  |  베팅 {seat.streetContribution}칩" : "");
         }
+        potAndAnte.text = paidTotal == 0 ? $"팟  {game.pot}칩"
+            : paidTotal < game.pot ? $"남은 팟  {game.pot - paidTotal}칩" : $"지급 완료  {paidTotal}칩";
         bool wasActing = acting;
         acting = game.hasLegal && game.currentSeat == packet.viewerSeat && !packet.paused
             && !game.hasResult && !game.dealPending && !game.revealPending && !dealing && !actionPending;
