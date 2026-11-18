@@ -115,7 +115,7 @@ internal sealed class Play2TableAtmosphere : MonoBehaviour
         return light;
     }
 
-    internal void Present(HoldemRoomPacket packet, Play2TablePreview.ShowdownBeat beat, int[] highlighted)
+    internal void Present(HoldemRoomPacket packet, Play2TablePreview.ShowdownBeat beat, int revealingSeat, int[] highlighted)
     {
         var game = packet?.game;
         bool reveal = beat == Play2TablePreview.ShowdownBeat.Reveal;
@@ -130,9 +130,9 @@ internal sealed class Play2TableAtmosphere : MonoBehaviour
             bool outOfGame = seat?.status == (int)HoldemSeatStatus.Busted;
             targetShade[i] = outOfGame ? .40f : folded ? .60f : 1f;
             bool livePair = remaining == 2 && seat?.dealtIn == true && !folded && !outOfGame && game?.hasResult == false;
-            bool showing = seat != null && Play2SettlementSummary.IsPublicHand(seat);
+            bool openingHand = i + 1 == revealingSeat;
             bool focus = beat == Play2TablePreview.ShowdownBeat.Finished || System.Array.IndexOf(highlighted, i + 1) >= 0;
-            seatIntensity[i] = award && seat?.awarded > 0 ? (focus ? 3.15f : 1.2f) : reveal && showing ? 1.95f : livePair ? 1.5f : 0f;
+            seatIntensity[i] = award && seat?.awarded > 0 ? (focus ? 2.35f : 1.2f) : reveal && openingHand ? 1.8f : livePair ? 1.5f : 0f;
         }
     }
 

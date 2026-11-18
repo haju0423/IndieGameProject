@@ -198,7 +198,7 @@ internal sealed class Play2TableReactions
         var mouse = Mouse.current;
         if (state?.hasGame != true || mouse?.leftButton.wasPressedThisFrame != true) return wasOpen;
         Vector2 point = mouse.position.ReadValue();
-        if (EventSystem.current?.IsPointerOverGameObject() == true) return wasOpen;
+        if (!camera.pixelRect.Contains(point) || EventSystem.current?.IsPointerOverGameObject() == true) return wasOpen;
         Close();
         int nearest = -1;
         float distance = float.PositiveInfinity;

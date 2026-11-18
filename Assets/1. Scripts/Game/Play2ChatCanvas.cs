@@ -17,9 +17,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     [SerializeField] private UnityEngine.UI.Toggle dealer;
     [SerializeField] private UnityEngine.UI.Button send;
 
-    private const float PanelWidth = 378f;
-    private const float CompactHeight = 535f;
-    private const float ReadingHeight = 640f;
+    internal const float DockWidth = 344f;
     private const float RowSpacing = 1f;
     private static readonly Color ChatText = Play2UGui.Hex("F0E6CB");
 
@@ -85,8 +83,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     {
         panelRect = (RectTransform)panel.transform;
         panelRect.pivot = Vector2.zero;
-        var background = Play2HudArt.Skin(panel.GetComponent<UnityEngine.UI.Graphic>(), "PlayingChat");
-        background.color = Play2UGui.Hex("101A1CCC");
+        panel.GetComponent<UnityEngine.UI.Graphic>().color = Play2UGui.Hex("152420");
 
         scrollRect = (RectTransform)scroll.transform;
         scroll.movementType = UnityEngine.UI.ScrollRect.MovementType.Clamped;
@@ -161,7 +158,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         dealer.targetGraphic = dealerBackground;
         dealerLabel = Play2UGui.Text("Request Label", dealerRect, "딜러 요청", Vector2.zero, new Vector2(115, 30),
             16, ChatText, Font, style: FontStyles.Bold);
-        requestHint = Play2UGui.Text("Request Hint", panelRect, "", new Vector2(245, 67), new Vector2(200, 31),
+        requestHint = Play2UGui.Text("Request Hint", panelRect, "", new Vector2(238, 67), new Vector2(188, 31),
             13, Play2UGui.Gold, Font, TextAlignmentOptions.MidlineLeft);
         requestHint.rectTransform.anchorMin = requestHint.rectTransform.anchorMax = Vector2.zero;
         var sendRect = (RectTransform)send.transform;
@@ -268,13 +265,10 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     private void ApplyLayout()
     {
         panelRect.anchorMin = Vector2.zero;
-        panelRect.anchorMax = Vector2.zero;
-        const float left = 11f;
-        const float bottom = 15f;
-        panelRect.offsetMin = new Vector2(left, bottom);
+        panelRect.anchorMax = Vector2.up;
+        panelRect.offsetMin = Vector2.zero;
+        panelRect.offsetMax = new Vector2(DockWidth, 0);
         layoutCanvasHeight = ((RectTransform)panelRect.parent).rect.height;
-        float height = Mathf.Min(expanded ? ReadingHeight : CompactHeight, Mathf.Max(210f, layoutCanvasHeight - 85f));
-        panelRect.offsetMax = new Vector2(left + PanelWidth, bottom + height);
         scrollRect.offsetMin = new Vector2(12, 87);
         scrollRect.offsetMax = new Vector2(-23, -38);
         closeHint.SetActive(expanded);
@@ -287,13 +281,6 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     private void RestoreScroll(bool keepOffset, float offset)
     {
         UnityEngine.UI.LayoutRebuilder.ForceRebuildLayoutImmediate(scroll.content);
-        if (recordsOpen)
-        {
-            float desired = Mathf.Max(CompactHeight + 42f, scroll.content.rect.height + 167f);
-            layoutCanvasHeight = ((RectTransform)panelRect.parent).rect.height;
-            float height = Mathf.Min(desired, Mathf.Min(ReadingHeight, layoutCanvasHeight - 85f));
-            panelRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, height);
-        }
         scroll.StopMovement();
         float maxOffset = scroll.content.rect.height - scroll.viewport.rect.height;
         scroll.verticalNormalizedPosition = keepOffset && maxOffset > 0 ? 1f - Mathf.Clamp01(offset / maxOffset) : 0f;

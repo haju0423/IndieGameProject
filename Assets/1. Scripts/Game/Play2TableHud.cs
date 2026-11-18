@@ -12,7 +12,7 @@ internal sealed partial class Play2TableHud
 {
     private readonly Play2TablePreview table;
     private readonly Play2FrontEnd owner;
-    private readonly RectTransform root, controls, sizing, accusation, betAdjustments, allInOption, potPanel;
+    private readonly RectTransform root, controls, sizing, accusation, betAdjustments, allInOption;
     private readonly RectTransform[] seatPanels = new RectTransform[4];
     private readonly TextMeshProUGUI[] seatStates = new TextMeshProUGUI[4];
     private readonly UnityEngine.UI.Image[] seatTurns = new UnityEngine.UI.Image[4];
@@ -67,7 +67,8 @@ internal sealed partial class Play2TableHud
             "PlayingBadge", Play2UGui.Cream, font, OpenSettings, 16);
         options.GetComponent<RectTransform>().anchorMin = options.GetComponent<RectTransform>().anchorMax = Vector2.one;
 
-        potPanel = Play2UGui.Panel("Table Pot", root, Vector2.zero, new Vector2(190, 62), Color.clear);
+        var potPanel = Play2UGui.Panel("Table Pot", root, new Vector2(0, -32), new Vector2(190, 58), Color.clear);
+        potPanel.anchorMin = potPanel.anchorMax = new Vector2(.5f, 1f);
         potAndAnte = Play2UGui.Text("Pot Amount", potPanel, "", new Vector2(0, 10), new Vector2(180, 34), 25,
             Play2UGui.Gold, font, style: FontStyles.Bold);
         Play2HudArt.Fit(potAndAnte, 19);
@@ -105,7 +106,7 @@ internal sealed partial class Play2TableHud
             seatStates[i].richText = false;
         }
 
-        var noticePanel = Play2HudArt.Plate("Action Notice", root, new Vector2(0, -32), new Vector2(600, 50), "CreamPanel");
+        var noticePanel = Play2HudArt.Plate("Action Notice", root, new Vector2(0, -85), new Vector2(600, 50), "CreamPanel");
         noticePanel.anchorMin = noticePanel.anchorMax = new Vector2(.5f, 1);
         notice = Play2UGui.Text("Text", noticePanel, "", Vector2.zero, new Vector2(574, 44), 18, PaperInk, font,
             style: FontStyles.Bold);
@@ -147,7 +148,7 @@ internal sealed partial class Play2TableHud
         feedback.richText = false;
         Play2HudArt.Fit(feedback, 13);
         feedbackPanel.gameObject.SetActive(false);
-        handGuide = new Play2HandGuide(root, font);
+        handGuide = new Play2HandGuide(root, (RectTransform)parent, font);
         (sizing, betHand, target, betHeading, betAdjustments, allInOption) = BuildBetPicker(root, font);
         (accusation, accusationHand, suspectPlates, suspectNames) = BuildAccusationPicker(root, font);
         showdownCaption = Play2HudArt.Plate("Showdown Caption", root, new Vector2(-190, 65), new Vector2(344, 82), "PlayingBadge");
@@ -161,7 +162,7 @@ internal sealed partial class Play2TableHud
         Play2HudArt.Fit(showdownDetail, 13);
         showdownCaption.gameObject.SetActive(false);
         settlementCard = new SettlementCard(root, font, AdvanceHand, table.ToggleRematchReady);
-        settings = new Play2InGameSettings(root, font);
+        settings = new Play2InGameSettings((RectTransform)parent, font);
         root.gameObject.SetActive(false);
     }
 
@@ -175,6 +176,7 @@ internal sealed partial class Play2TableHud
             notice.transform.parent.gameObject.SetActive(false);
             shownNotices.Clear();
             if (settings.IsOpen) settings.Close();
+            handGuide.Close();
             settlementCard.Hide();
             CloseActionPanels();
             root.gameObject.SetActive(false);
@@ -371,13 +373,12 @@ internal sealed partial class Play2TableHud
 
     private void UpdatePositions(HoldemRoomPacket value)
     {
-        PositionAtViewport(potPanel, table.PotLabelViewport, 105, 160);
         var noticePanel = (RectTransform)notice.transform.parent;
         float noticeBottom = -noticePanel.anchoredPosition.y + noticePanel.rect.height / 2;
         for (int i = 0; i < seatPanels.Length; i++)
         {
             if (i + 1 == value.viewerSeat)
-                seatPanels[i].anchoredPosition = new Vector2(90, -root.rect.height / 2 + 35);
+                seatPanels[i].anchoredPosition = new Vector2(-.17f * root.rect.width, -root.rect.height / 2 + 35);
             else
             {
                 var point = table.PlayerLabelViewport(i + 1);
