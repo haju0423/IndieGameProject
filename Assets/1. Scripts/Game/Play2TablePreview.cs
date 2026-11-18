@@ -35,7 +35,6 @@ public sealed class Play2TablePreview : MonoBehaviour
     private readonly Play2AllInPosture[] postures = new Play2AllInPosture[4];
     [SerializeField] private Camera seatCamera;
     [SerializeField] private Transform tabletop;
-    [SerializeField] private Transform[] stools = Array.Empty<Transform>();
     [SerializeField] private GameObject[] players;
     [SerializeField] private Transform[] eyes;
     [SerializeField] private CardVisual cardPrefab;
@@ -131,13 +130,11 @@ public sealed class Play2TablePreview : MonoBehaviour
             players[1].transform.RotateAround(centre, Vector3.up, angle);
             players[2].transform.RotateAround(centre, Vector3.up, -angle);
             (eyes[1], eyes[2]) = (eyes[2], eyes[1]);
-            if (stools.Length >= 3) (stools[1], stools[2]) = (stools[2], stools[1]);
         }
         showdownCards = new Play2ShowdownCards();
         actorSkins = players.Select(player => player.GetComponentsInChildren<SkinnedMeshRenderer>(true)).ToArray();
         for (int i = 0; i < players.Length; i++)
-            postures[i] = new Play2AllInPosture(players[i].GetComponent<Animator>(),
-                i < stools.Length ? stools[i] : null, tabletop.position);
+            postures[i] = new Play2AllInPosture(players[i].GetComponent<Animator>());
         chips = new GameObject("Table pot").AddComponent<Play2TableChips>();
         chips.transform.SetParent(tabletop, false);
         tableAudio = gameObject.AddComponent<Play2TableAudio>();
@@ -161,6 +158,10 @@ public sealed class Play2TablePreview : MonoBehaviour
         SetState(session.State);
     }
 
+    internal bool WatchingPractice => session != null && session.WatchingPractice;
+    internal void WatchRemainingPractice() => session?.WatchRemainingPractice();
+    internal bool IsPractice => session != null && session.IsLocal;
+    internal void NewPracticeAfterBust(string hand) => session?.NewPracticeAfterBust(hand);
     internal bool IsHost => session != null && session.IsHost;
     internal bool ActionPending => session != null && session.ActionPending;
     internal bool IsDealing => Time.time < animationUntil;

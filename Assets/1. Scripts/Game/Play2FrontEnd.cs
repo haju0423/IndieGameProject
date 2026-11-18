@@ -48,6 +48,7 @@ public sealed class Play2FrontEnd : MonoBehaviour
         }
         hud.Present(packet, status);
         chatCanvas.Present(packet);
+        hud.TickPracticeAdvance(chatCanvas.IsTyping || blockActions);
         if (!hud.CanOpenChat) chatCanvas.DiscardFocusRequest();
         else if (chatCanvas.HandleEnter()) return;
         hud.HandleKeys(chatCanvas.IsTyping || blockActions);

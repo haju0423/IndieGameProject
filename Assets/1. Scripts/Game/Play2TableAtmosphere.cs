@@ -44,7 +44,7 @@ internal sealed class Play2TableAtmosphere : MonoBehaviour
         string[] environmentRoots = { "Terrain", "Buildings", "Sky", "Rocks", "Path", "Vegetation", "Props", "Exterior" };
         surroundings = FindObjectsByType<Renderer>(FindObjectsSortMode.None)
             .Where(renderer => environmentRoots.Contains(renderer.transform.root.name)
-                && renderer.name != "table" && !renderer.name.StartsWith("BOX")) .ToArray();
+                && renderer.name != "table" && !renderer.name.StartsWith("Table Chair ", System.StringComparison.Ordinal)).ToArray();
         surroundingsVisible = surroundings.Select(renderer => renderer.enabled).ToArray();
         room = Instantiate(Resources.Load<GameObject>("TablePresentation/QuietRoom"), table.position, Quaternion.identity, transform);
         var key = AddLight("Table overhead", table.position + Vector3.up * 2.01f, LightType.Spot, 3.6f, 6);

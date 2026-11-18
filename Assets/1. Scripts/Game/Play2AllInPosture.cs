@@ -20,8 +20,6 @@ internal sealed class Play2AllInPosture
     private static readonly int Ready = Animator.StringToHash("Ready");
     private readonly Animator animator;
     private readonly bool hasStandClip;
-    private readonly Transform stool;
-    private readonly Vector3 stoolAtRest, stoolTravel;
     private Vector3 plantedFeet;
     private float seatedHipHeight;
     private bool modified, standCycle;
@@ -31,15 +29,9 @@ internal sealed class Play2AllInPosture
     internal float Weight => Mathf.SmoothStep(0f, 1f, progress);
     internal float Rise { get; private set; }
 
-    internal Play2AllInPosture(Animator animator, Transform stool, Vector3 tableCenter)
+    internal Play2AllInPosture(Animator animator)
     {
         this.animator = animator;
-        this.stool = stool;
-        if (stool != null)
-        {
-            stoolAtRest = stool.position;
-            stoolTravel = Vector3.ProjectOnPlane(stoolAtRest - tableCenter, Vector3.up).normalized * .13f;
-        }
         hasStandClip = Array.Exists(animator.parameters, p => p.nameHash == AtTable && p.type == AnimatorControllerParameterType.Bool);
         var rest = animator.avatar.humanDescription.skeleton;
         for (int i = 0; i < joints.Length; i++)
@@ -71,7 +63,6 @@ internal sealed class Play2AllInPosture
     internal void Animate(bool firstPerson, bool pushing = false)
     {
         progress = Mathf.MoveTowards(progress, AllIn && !pushing ? 1f : 0f, Time.deltaTime / .68f);
-        if (stool != null) stool.position = stoolAtRest + stoolTravel * Weight;
         Rise = 0f;
         if (firstPerson || !hips.gameObject.activeInHierarchy) return;
         if (hasStandClip)
