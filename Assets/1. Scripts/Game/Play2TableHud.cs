@@ -378,7 +378,7 @@ internal sealed partial class Play2TableHud
         for (int i = 0; i < seatPanels.Length; i++)
         {
             if (i + 1 == value.viewerSeat)
-                seatPanels[i].anchoredPosition = new Vector2(-.17f * root.rect.width, -root.rect.height / 2 + 35);
+                seatPanels[i].anchoredPosition = new Vector2(-.17f * root.rect.width, -root.rect.height / 2 + 43);
             else
             {
                 var point = table.PlayerLabelViewport(i + 1);
