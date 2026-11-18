@@ -15082,6 +15082,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Play2TablePreview
   seatCamera: {fileID: 1362721856}
   tabletop: {fileID: 82219273}
+  stools:
+  - {fileID: 1488189797}
+  - {fileID: 495929161}
+  - {fileID: 1691572510}
+  - {fileID: 1574518480}
   players:
   - {fileID: 594174600}
   - {fileID: 410817594}

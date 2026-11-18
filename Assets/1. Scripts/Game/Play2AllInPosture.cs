@@ -20,7 +20,10 @@ internal sealed class Play2AllInPosture
     private static readonly int Ready = Animator.StringToHash("Ready");
     private readonly Animator animator;
     private readonly bool hasStandClip;
-    private float seatedHipHeight, plantedHeight;
+    private readonly Transform stool;
+    private readonly Vector3 stoolAtRest, stoolTravel;
+    private Vector3 plantedFeet;
+    private float seatedHipHeight;
     private bool modified, standCycle;
     private float progress;
 
@@ -28,9 +31,15 @@ internal sealed class Play2AllInPosture
     internal float Weight => Mathf.SmoothStep(0f, 1f, progress);
     internal float Rise { get; private set; }
 
-    internal Play2AllInPosture(Animator animator)
+    internal Play2AllInPosture(Animator animator, Transform stool, Vector3 tableCenter)
     {
         this.animator = animator;
+        this.stool = stool;
+        if (stool != null)
+        {
+            stoolAtRest = stool.position;
+            stoolTravel = Vector3.ProjectOnPlane(stoolAtRest - tableCenter, Vector3.up).normalized * .13f;
+        }
         hasStandClip = Array.Exists(animator.parameters, p => p.nameHash == AtTable && p.type == AnimatorControllerParameterType.Bool);
         var rest = animator.avatar.humanDescription.skeleton;
         for (int i = 0; i < joints.Length; i++)
@@ -62,6 +71,7 @@ internal sealed class Play2AllInPosture
     internal void Animate(bool firstPerson, bool pushing = false)
     {
         progress = Mathf.MoveTowards(progress, AllIn && !pushing ? 1f : 0f, Time.deltaTime / .68f);
+        if (stool != null) stool.position = stoolAtRest + stoolTravel * Weight;
         Rise = 0f;
         if (firstPerson || !hips.gameObject.activeInHierarchy) return;
         if (hasStandClip)
@@ -69,20 +79,20 @@ internal sealed class Play2AllInPosture
             // Unity resets animator parameters when a hidden seat becomes visible again.
             if (!animator.GetBool(AtTable)) animator.SetBool(AtTable, true);
             bool standingAtTable = AllIn && !pushing;
-            float feet = (leftFoot.position.y + rightFoot.position.y) * .5f;
-            bool wasStanding = animator.GetBool(Ready);
-            if (standingAtTable && !wasStanding)
+            Vector3 feet = (leftFoot.position + rightFoot.position) * .5f;
+            if (standingAtTable && !standCycle)
             {
                 standCycle = true;
                 seatedHipHeight = hips.position.y;
-                plantedHeight = feet;
+                plantedFeet = feet;
             }
             animator.SetBool(Ready, standingAtTable);
             if (!standingAtTable && !animator.IsInTransition(0) && animator.GetCurrentAnimatorStateInfo(0).IsName("Seated")) standCycle = false;
             if (standCycle)
             {
                 hipLocal = hips.localPosition;
-                hips.position += Vector3.up * (plantedHeight - feet);
+                // In-place rise clips slide the ankles backwards beneath the seat.
+                hips.position += plantedFeet - feet;
                 Rise = Mathf.Max(0f, hips.position.y - seatedHipHeight);
                 modified = true;
             }
