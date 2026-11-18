@@ -209,18 +209,13 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 7356612580536871185, guid: 425ee373d3f9dea4fb840a9b46838e5a, type: 3}
       propertyPath: 'm_Materials.Array.data[0]'
-      value:
+      value: 
       objectReference: {fileID: 2100000, guid: 0195df6562ec34d44a3203553a0a4adc, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 425ee373d3f9dea4fb840a9b46838e5a, type: 3}
---- !u!1 &237515634 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: 425ee373d3f9dea4fb840a9b46838e5a, type: 3}
-  m_PrefabInstance: {fileID: 237515633}
-  m_PrefabAsset: {fileID: 0}
 --- !u!4 &237515635 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 425ee373d3f9dea4fb840a9b46838e5a, type: 3}
@@ -321,6 +316,10 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: -1652376854207897030, guid: 562d0839feabe2a4d80c4131dc3b58e0, type: 3}
+      propertyPath: 'm_Materials.Array.data[0]'
+      value: 
+      objectReference: {fileID: 2100000, guid: eb9d47ffcf3ec024b9c0ca33840bb7ed, type: 2}
     - target: {fileID: 919132149155446097, guid: 562d0839feabe2a4d80c4131dc3b58e0, type: 3}
       propertyPath: m_Name
       value: Owl_Humanoid_FullBody
@@ -333,10 +332,6 @@ PrefabInstance:
       propertyPath: m_ApplyRootMotion
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: -1652376854207897030, guid: 562d0839feabe2a4d80c4131dc3b58e0, type: 3}
-      propertyPath: 'm_Materials.Array.data[0]'
-      value:
-      objectReference: {fileID: 2100000, guid: eb9d47ffcf3ec024b9c0ca33840bb7ed, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -345,11 +340,6 @@ PrefabInstance:
       insertIndex: -1
       addedObject: {fileID: 1827331220}
   m_SourcePrefab: {fileID: 100100000, guid: 562d0839feabe2a4d80c4131dc3b58e0, type: 3}
---- !u!1 &629239077 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: 562d0839feabe2a4d80c4131dc3b58e0, type: 3}
-  m_PrefabInstance: {fileID: 629239076}
-  m_PrefabAsset: {fileID: 0}
 --- !u!4 &629239078 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 562d0839feabe2a4d80c4131dc3b58e0, type: 3}
@@ -415,6 +405,10 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: -7613659308265048067, guid: 3996d2d6c1e847d4db5af097225597b8, type: 3}
+      propertyPath: 'm_Materials.Array.data[0]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 27fccf661bd297a4ab64f665460eca7a, type: 2}
     - target: {fileID: 919132149155446097, guid: 3996d2d6c1e847d4db5af097225597b8, type: 3}
       propertyPath: m_Name
       value: Fox_Humanoid_FullBody
@@ -427,10 +421,6 @@ PrefabInstance:
       propertyPath: m_ApplyRootMotion
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: -7613659308265048067, guid: 3996d2d6c1e847d4db5af097225597b8, type: 3}
-      propertyPath: 'm_Materials.Array.data[0]'
-      value:
-      objectReference: {fileID: 2100000, guid: 27fccf661bd297a4ab64f665460eca7a, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -439,11 +429,6 @@ PrefabInstance:
       insertIndex: -1
       addedObject: {fileID: 1176835034}
   m_SourcePrefab: {fileID: 100100000, guid: 3996d2d6c1e847d4db5af097225597b8, type: 3}
---- !u!1 &833853924 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: 3996d2d6c1e847d4db5af097225597b8, type: 3}
-  m_PrefabInstance: {fileID: 833853923}
-  m_PrefabAsset: {fileID: 0}
 --- !u!4 &833853925 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 3996d2d6c1e847d4db5af097225597b8, type: 3}
@@ -672,10 +657,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Play2Lobby
   models:
-  - {fileID: 833853924}
-  - {fileID: 237515634}
-  - {fileID: 1881251381}
-  - {fileID: 629239077}
+  - {fileID: 6831032078618760121, guid: 2056abee40990434da1faa95834b59e4, type: 3}
+  - {fileID: 7510387240994742001, guid: 6f0a2c3714b4e407b9d0ab99c84f3707, type: 3}
+  - {fileID: 5558726561952993350, guid: 23123ac791c37410db1e44361c1f4ab5, type: 3}
+  - {fileID: 8545167055708725600, guid: 0a3236c1ca6024565aaf675ad5ddc5ae, type: 3}
 --- !u!1 &1827331217 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 7202811197840256254, guid: 562d0839feabe2a4d80c4131dc3b58e0, type: 3}
@@ -793,7 +778,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 7349739799479326469, guid: ebc69185c8b159b42b581683c97bc59f, type: 3}
       propertyPath: 'm_Materials.Array.data[0]'
-      value:
+      value: 
       objectReference: {fileID: 2100000, guid: 66a44ccea86d7ee41b472ea9b0f4d0f9, type: 2}
     m_RemovedComponents: []
     m_RemovedGameObjects: []

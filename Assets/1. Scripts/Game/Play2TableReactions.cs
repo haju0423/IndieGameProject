@@ -23,6 +23,7 @@ internal sealed class Play2TableReactions
     private readonly Transform[] heads = new Transform[4];
     private readonly Quaternion[] headRest = new Quaternion[4];
     private readonly float[] started = { -100, -100, -100, -100 };
+    private readonly bool[] celebrating = new bool[4];
     private readonly int[] targets = new int[4];
     private readonly Play2Gesture[] gestures = new Play2Gesture[4];
     private string lastAccusation;
@@ -83,6 +84,13 @@ internal sealed class Play2TableReactions
             viewer = packet.viewerSeat;
             newest = entries.LastOrDefault()?.sequence ?? 0;
         }
+        if (packet.game.hasResult && packet.game.result?.kind != (int)Poker.Foundation.HoldemResultKind.Showdown)
+            foreach (var seat in packet.game.seats)
+                if (seat.awarded > 0 && !celebrating[seat.seat - 1])
+                {
+                    celebrating[seat.seat - 1] = true;
+                    Begin(seat.seat, seat.seat, Play2Gesture.Celebrate, 0);
+                }
         foreach (var entry in entries)
         {
             if (entry.sequence <= newest) continue;
@@ -123,6 +131,7 @@ internal sealed class Play2TableReactions
         foreach (var seat in packet.game.seats)
         {
             if (!Play2SettlementSummary.IsPublicHand(seat)) continue;
+            celebrating[seat.seat - 1] = seat.awarded > 0;
             Begin(seat.seat, seat.seat, seat.awarded > 0 ? Play2Gesture.Celebrate : Play2Gesture.Despair, 0f);
         }
     }
@@ -141,7 +150,12 @@ internal sealed class Play2TableReactions
         for (int i = 0; i < actors.Length; i++)
         {
             float elapsed = Time.time - started[i];
-            if (started[i] < 0) continue;
+            if (started[i] < 0)
+            {
+                if (celebrating[i] && heads[i] != null)
+                    heads[i].localRotation = headRest[i] * Quaternion.Euler(-8f + 1.4f * Mathf.Sin(Time.time * 2.2f), 0f, -4f);
+                continue;
+            }
             if (elapsed < 0) continue;
             if (chips.IsBetting(i)) { CancelGesture(i + 1); continue; }
             if (elapsed >= 1.33f)
@@ -250,6 +264,7 @@ internal sealed class Play2TableReactions
         for (int i = 0; i < actors.Length; i++)
         {
             chips.RestHand(i);
+            celebrating[i] = false;
             if (heads[i] != null) heads[i].localRotation = headRest[i];
             started[i] = -100;
         }

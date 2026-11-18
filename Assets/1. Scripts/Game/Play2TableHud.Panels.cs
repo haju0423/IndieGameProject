@@ -100,20 +100,7 @@ internal sealed partial class Play2TableHud
         return (panel, hand, amount, heading, adjustments, allIn);
     }
 
-    private RectTransform BuildFreeFold(RectTransform parent, TMP_FontAsset font)
-    {
-        var panel = Play2HudArt.Plate("Fold With Free Check", parent, new Vector2(-200, 80), new Vector2(370, 126), "PinePanel", true);
-        panel.anchorMin = panel.anchorMax = Vector2.right;
-        Play2UGui.Text("Free Check Hint", panel, "체크하면 칩을 내지 않고 계속할 수 있어요.", new Vector2(0, 27),
-            new Vector2(346, 40), 17, Play2UGui.Cream, font);
-        Play2HudArt.Button("Take Free Check", panel, "체크", new Vector2(-111, -23), new Vector2(115, 40), "GoldButton", PaperInk, font,
-            () => Act(BettingActionKind.Check));
-        Play2HudArt.Button("Confirm Fold", panel, "폴드하기", new Vector2(14, -23), new Vector2(116, 40), "ActionRow", Play2UGui.Cream, font,
-            () => Act(BettingActionKind.Fold));
-        Play2HudArt.Button("Cancel Fold", panel, "취소", new Vector2(126, -23), new Vector2(78, 40), "HeaderBadge", Play2UGui.Cream, font, CloseActionPanels);
-        panel.gameObject.SetActive(false);
-        return panel;
-    }
+
 
     private (RectTransform panel, TextMeshProUGUI hand, UnityEngine.UI.Image[] plates, TextMeshProUGUI[] names)
         BuildAccusationPicker(RectTransform parent, TMP_FontAsset font)

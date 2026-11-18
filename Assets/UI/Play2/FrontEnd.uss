@@ -33,3 +33,11 @@
 .seat-state { color: #e8c6a2; font-size: 14px; }
 .seat-state.ready { color: #a8e5a3; }
 .lobby-bottom { margin-top: auto; align-items: center; }
+
+.lobby-logo {
+    width: 103px;
+    height: 49px;
+    background-image: url("PaintedLobbyLogo.png");
+    background-size: contain;
+    background-position: center;
+}

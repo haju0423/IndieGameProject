@@ -42,7 +42,9 @@ internal sealed class Play2BettingHand
         if (viewModel != null)
         {
             animator.enabled = false;
-            Play2CardGrip.ShowArmOnly(actor.GetComponentInChildren<SkinnedMeshRenderer>(), upper);
+            var armSkin = actor.GetComponentInChildren<SkinnedMeshRenderer>();
+            fingers.PrepareViewMesh(armSkin);
+            Play2CardGrip.ShowArmOnly(armSkin, upper);
             viewModel.SetActive(false);
         }
     }
@@ -138,7 +140,11 @@ internal sealed class Play2BettingHand
         var rotation = fingers.PalmRotation(left, camera == null ? Vector3.up : camera.up,
             camera == null ? toward : camera.forward);
         if (gesture == Play2Gesture.Point)
-            rotation = fingers.PointingRotation(left, target - point);
+        {
+            Vector3 direction = target - point;
+            Vector3 backFacing = camera == null ? Vector3.up : camera.up - camera.forward * .3f;
+            rotation = fingers.PointingRotation(left, direction, backFacing);
+        }
         else if (gesture == Play2Gesture.Rude)
             rotation = fingers.PalmRotation(left, Vector3.up, -toward);
         else if (gesture == Play2Gesture.ThumbsDown)

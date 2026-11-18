@@ -40,6 +40,18 @@ internal static class Play2SettlementSummary
         }
     }
 
+    internal static int[] RevealOrder(HoldemRoomPacket packet)
+    {
+        var game = packet.game;
+        var eligible = game.seats.Where(IsPublicHand).Select(seat => seat.seat).ToArray();
+        var river = packet.history?.entries?.Where(entry => entry != null && entry.hasAction
+            && entry.street == (int)HoldemStreet.River && eligible.Contains(entry.seat)).ToArray();
+        var aggressor = river?.LastOrDefault(entry => entry.action == (int)BettingActionKind.BetTo
+            || entry.action == (int)BettingActionKind.RaiseTo);
+        int first = aggressor?.seat ?? river?.FirstOrDefault()?.seat ?? (game.button % 4 + 1);
+        return eligible.OrderBy(seat => (seat - first + 4) % 4).ToArray();
+    }
+
     internal static ShowdownAward[] ShowdownAwards(HoldemGamePacket game)
     {
         var hands = game.seats.Where(IsPublicHand).ToDictionary(seat => seat.seat);

@@ -17,10 +17,10 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     [SerializeField] private UnityEngine.UI.Toggle dealer;
     [SerializeField] private UnityEngine.UI.Button send;
 
-    private const float PanelWidth = 334f;
-    private const float CompactHeight = 354f;
-    private const float ReadingHeight = 456f;
-    private const float RowSpacing = 2f;
+    private const float PanelWidth = 378f;
+    private const float CompactHeight = 535f;
+    private const float ReadingHeight = 640f;
+    private const float RowSpacing = 1f;
     private static readonly Color ChatText = Play2UGui.Hex("F0E6CB");
 
     private Play2TablePreview table;
@@ -43,6 +43,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     private float dealerReceiptUntil;
     private float savedChatOffset, layoutCanvasHeight;
     private int visibleRecords = -1;
+    private readonly List<(int street, int accuser, int target, bool caught)> verdicts = new();
     internal TMPro.TMP_FontAsset Font => messages.font;
     internal bool IsTyping => panel.activeInHierarchy && (expanded || input.isFocused);
 
@@ -135,7 +136,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
 
         var inputRect = (RectTransform)input.transform;
         inputRect.offsetMin = new Vector2(10, 12);
-        inputRect.offsetMax = new Vector2(-65, 46);
+        inputRect.offsetMax = new Vector2(-81, 46);
         if (input.targetGraphic != null)
             input.targetGraphic = inputBackground = Play2HudArt.Skin(input.targetGraphic, "PlayingInput");
         input.textComponent.color = ChatText;
@@ -151,7 +152,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         inputFocus.effectDistance = new Vector2(1, 1);
         var dealerRect = (RectTransform)dealer.transform;
         dealerRect.anchorMin = dealerRect.anchorMax = dealerRect.pivot = Vector2.zero;
-        dealerRect.anchoredPosition = new Vector2(14, 62);
+        dealerRect.anchoredPosition = new Vector2(11, 51);
         dealerRect.sizeDelta = new Vector2(123, 34);
         foreach (Transform child in dealerRect) child.gameObject.SetActive(false);
         dealer.graphic = null;
@@ -160,17 +161,27 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         dealer.targetGraphic = dealerBackground;
         dealerLabel = Play2UGui.Text("Request Label", dealerRect, "딜러 요청", Vector2.zero, new Vector2(115, 30),
             16, ChatText, Font, style: FontStyles.Bold);
-        requestHint = Play2UGui.Text("Request Hint", panelRect, "", new Vector2(229, 79), new Vector2(170, 36),
+        requestHint = Play2UGui.Text("Request Hint", panelRect, "", new Vector2(245, 67), new Vector2(200, 31),
             13, Play2UGui.Gold, Font, TextAlignmentOptions.MidlineLeft);
         requestHint.rectTransform.anchorMin = requestHint.rectTransform.anchorMax = Vector2.zero;
         var sendRect = (RectTransform)send.transform;
         sendRect.anchorMin = sendRect.anchorMax = sendRect.pivot = Vector2.right;
         sendRect.anchoredPosition = new Vector2(-8, 12);
-        sendRect.sizeDelta = new Vector2(52, 34);
+        sendRect.sizeDelta = new Vector2(69, 34);
         send.targetGraphic = Play2HudArt.Skin(send.targetGraphic, "PlayingSend");
         sendLabel = send.GetComponentInChildren<TMP_Text>();
         sendLabel.color = ChatText;
-        sendLabel.fontSize = 15;
+        sendLabel.fontSize = 16;
+        // Keep the action readable even while the empty composer cannot send.
+        var colors = send.colors;
+        colors.disabledColor = new Color(.74f, .75f, .70f, 1f);
+        send.colors = colors;
+        sendLabel.enableAutoSizing = false;
+        var caption = sendLabel.rectTransform;
+        caption.anchorMin = Vector2.zero; caption.anchorMax = Vector2.one;
+        caption.offsetMin = Vector2.zero; caption.offsetMax = Vector2.zero;
+        sendLabel.alignment = TextAlignmentOptions.Center;
+        send.transform.SetAsLastSibling();
         ApplyLayout();
     }
 
@@ -222,12 +233,12 @@ public sealed class Play2ChatCanvas : MonoBehaviour
             dealerReceiptUntil = 0;
             RefreshComposer();
         }
-        if (!IsTyping) return;
-        if (expanded && !Mathf.Approximately(((RectTransform)panelRect.parent).rect.height, layoutCanvasHeight))
+        if (panel.activeInHierarchy && !Mathf.Approximately(((RectTransform)panelRect.parent).rect.height, layoutCanvasHeight))
         {
             ApplyLayout();
             RestoreScroll(scroll.verticalNormalizedPosition > .01f, scroll.content.anchoredPosition.y);
         }
+        if (!IsTyping) return;
         var keyboard = Keyboard.current;
         var mouse = Mouse.current;
         bool clickedOutside = mouse != null && mouse.leftButton.wasPressedThisFrame
@@ -262,10 +273,10 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         const float bottom = 15f;
         panelRect.offsetMin = new Vector2(left, bottom);
         layoutCanvasHeight = ((RectTransform)panelRect.parent).rect.height;
-        float height = expanded ? Mathf.Min(ReadingHeight, layoutCanvasHeight - 200f) : CompactHeight;
+        float height = Mathf.Min(expanded ? ReadingHeight : CompactHeight, Mathf.Max(210f, layoutCanvasHeight - 85f));
         panelRect.offsetMax = new Vector2(left + PanelWidth, bottom + height);
-        scrollRect.offsetMin = new Vector2(12, 105);
-        scrollRect.offsetMax = new Vector2(-25, -47);
+        scrollRect.offsetMin = new Vector2(12, 87);
+        scrollRect.offsetMax = new Vector2(-23, -38);
         closeHint.SetActive(expanded);
         inputFocus.enabled = expanded;
         scrollbarRail.gameObject.SetActive(true);
@@ -280,7 +291,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         {
             float desired = Mathf.Max(CompactHeight + 42f, scroll.content.rect.height + 167f);
             layoutCanvasHeight = ((RectTransform)panelRect.parent).rect.height;
-            float height = Mathf.Min(desired, Mathf.Min(ReadingHeight, layoutCanvasHeight - 200));
+            float height = Mathf.Min(desired, Mathf.Min(ReadingHeight, layoutCanvasHeight - 85f));
             panelRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, height);
         }
         scroll.StopMovement();
@@ -295,6 +306,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         if (packet?.sessionId != value?.sessionId || packet?.viewerSeat != value?.viewerSeat
             || packet?.game?.handId != value?.game?.handId)
         {
+            verdicts.Clear();
             visibleRecords = -1;
             firstMessage = lastMessage = -2;
         }
@@ -321,14 +333,26 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         input.characterLimit = packet.chat.maximumTextLength;
         RefreshComposer();
 
+        if (packet.game.accusationOutcomes != null)
+            foreach (var outcome in packet.game.accusationOutcomes)
+                RememberVerdict(outcome.street, outcome.accuser, outcome.target, outcome.hit);
+        var verdict = packet.hasTurnAccusation ? packet.turnAccusation : null;
+        if (verdict != null && verdict.handId == packet.game.handId)
+            RememberVerdict(verdict.street, verdict.accuser, verdict.target, verdict.caught);
         RefreshRows(false);
+    }
+
+    private void RememberVerdict(int street, int accuser, int target, bool caught)
+    {
+        var verdict = (street, accuser, target, caught);
+        if (!verdicts.Contains(verdict)) verdicts.Add(verdict);
     }
 
     private void RefreshRows(bool switching)
     {
         var records = packet.dealerSelections;
-        int count = records?.Length ?? 0;
-        historyLabel.text = recordsOpen ? "대화로" : $"채택 기록 {count}";
+        int count = (records?.Length ?? 0) + verdicts.Count;
+        historyLabel.text = recordsOpen ? "대화로" : $"판 기록 {count}";
         if (recordsOpen)
         {
             if (visibleRecords == count && !switching) return;
@@ -341,7 +365,13 @@ public sealed class Play2ChatCanvas : MonoBehaviour
                 string meaning = string.IsNullOrWhiteSpace(item.Interpretation) ? "" : "\n" + item.Interpretation;
                 SetRow(i, Name(item.Speaker.Value), item.Text + meaning + "\n" + card);
             }
-            if (count == 0) SetRow(0, "딜러", "아직 채택된 문장이 없습니다.");
+            for (int i = 0; i < verdicts.Count; i++)
+            {
+                var verdict = verdicts[i];
+                string outcome = verdict.caught ? "고발 성공" : "고발 실패";
+                SetRow(allowed.Count + i, "고발", $"{Name(verdict.accuser)} → {Name(verdict.target)}  {outcome}");
+            }
+            if (count == 0) SetRow(0, "딜러", "아직 채택된 문장이나 고발이 없어요.");
             for (int i = Mathf.Max(1, count); i < rows.Count; i++) rows[i].root.gameObject.SetActive(false);
             RestoreScroll(false, 0);
             scroll.verticalNormalizedPosition = 1;
@@ -395,7 +425,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         var speaker = Play2UGui.Text("Speaker", root, "", Vector2.zero, Vector2.zero, 15,
             Play2UGui.Hex("ADCFCA"), Font, TextAlignmentOptions.MidlineLeft, FontStyles.Bold);
         var nameLayout = speaker.gameObject.AddComponent<UnityEngine.UI.LayoutElement>();
-        nameLayout.minWidth = nameLayout.preferredWidth = 72;
+        nameLayout.minWidth = nameLayout.preferredWidth = 64;
         nameLayout.preferredHeight = 25;
         speaker.richText = false;
         speaker.textWrappingMode = TextWrappingModes.NoWrap;
@@ -460,13 +490,16 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         dealer.interactable = !pending && (canRequest || dealer.isOn);
         send.interactable = !pending && !expired && !string.IsNullOrWhiteSpace(input.text);
         sendLabel.text = pending ? "전송 중" : "전송";
+        sendLabel.color = ChatText;
+        if (send.targetGraphic != null)
+            send.targetGraphic.color = send.interactable ? Play2UGui.Hex("3F6657") : Play2UGui.Hex("354543");
         requestHint.text = pending ? "서버 응답을 기다리는 중"
             : expired ? "요청 종료. 버튼을 끄면 대화로 전송"
             : deliveryUnconfirmed ? "전송 여부를 대화에서 확인해 주세요"
             : dealer.isOn ? "이번 문장을 딜러에게도 전달"
             : dealerReceiptUntil > 0 && string.IsNullOrEmpty(input.text) ? "딜러에게 전달했어요"
             : "문장은 모두에게 보여요";
-        dealerLabel.text = dealer.isOn ? "딜러 요청 켜짐" : "딜러 요청";
+        dealerLabel.text = dealer.isOn ? "요청 켜짐" : "딜러 요청";
         dealerLabel.color = dealer.isOn ? Play2UGui.Ink : ChatText;
         dealerBackground.color = dealer.isOn ? Play2UGui.Gold : Play2UGui.PineInset;
     }

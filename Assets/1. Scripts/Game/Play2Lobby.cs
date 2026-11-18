@@ -9,6 +9,7 @@ using UnityEngine.UIElements;
 [RequireComponent(typeof(UIDocument))]
 public sealed class Play2Lobby : MonoBehaviour
 {
+    private static readonly int ReadyPose = Animator.StringToHash("Ready");
     [SerializeField] private GameObject[] models;
 
     private Play2RoomSession session;
@@ -125,6 +126,8 @@ public sealed class Play2Lobby : MonoBehaviour
                 : !occupied ? "연결 끊김" : isReady ? "✓ 준비 완료" : "준비 중";
             plate.EnableInClassList("mine", i + 1 == packet.viewerSeat);
             seatStates[i].EnableInClassList("ready", isReady);
+            if (occupied && !session.IsLocal && (entering || isReady != wasReady[i]))
+                actors[i].GetComponent<Animator>().SetBool(ReadyPose, isReady);
             if (isReady != wasReady[i]) Animate(plate, 0.45f, 7f, 0f);
             wasReady[i] = isReady;
         }
@@ -211,7 +214,7 @@ public sealed class Play2Lobby : MonoBehaviour
             stands[i].SetParent(stage.transform, false);
             Block("Seat riser", new Vector3(0f, 0.19f, 0.29f), new Vector3(0.58f, 0.38f, 0.48f), darkerWood, stands[i]);
             actors[i] = Instantiate(models[i], stands[i]);
-            actors[i].transform.localPosition = new Vector3(0f, 0.19f, 0f);
+            actors[i].transform.localPosition = Vector3.up * 0.008f;
             actors[i].transform.localRotation = Quaternion.Euler(0f, 180f + (i - 1.5f) * 8f, 0f);
             actors[i].SetActive(false);
         }

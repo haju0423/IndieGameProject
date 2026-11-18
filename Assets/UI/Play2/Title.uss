@@ -31,7 +31,7 @@
     height: 178px;
     margin-left: -13px;
     margin-bottom: 19px;
-    background-image: url("OneMoreCardLogo.png");
+    background-image: url("PaintedTitleLogo.png");
     background-size: contain;
     background-position: left center;
 }

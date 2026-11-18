@@ -20,6 +20,14 @@ public sealed class Play2TablePreview : MonoBehaviour
     private Play2SettlementSummary.ShowdownAward[] awards = Array.Empty<Play2SettlementSummary.ShowdownAward>();
     private Play2ShowdownCards showdownCards;
     private float beatUntil;
+    private int[] revealOrder = Array.Empty<int>();
+    private int openedHands;
+    internal int RevealingSeat => Showdown == ShowdownBeat.Reveal && openedHands > 0 ? revealOrder[openedHands - 1] : 0;
+    internal bool IsHandShown(int seat)
+    {
+        if (Showdown is ShowdownBeat.Award or ShowdownBeat.Finished) return true;
+        return Array.IndexOf(revealOrder, seat, 0, openedHands) >= 0;
+    }
     private readonly Play2AllInPosture[] postures = new Play2AllInPosture[4];
     [SerializeField] private Camera seatCamera;
     [SerializeField] private Transform tabletop;
@@ -81,7 +89,12 @@ public sealed class Play2TablePreview : MonoBehaviour
         }
         float aspect = Mathf.Min(seatCamera.aspect, 16f / 9f);
         seatCamera.fieldOfView = Camera.HorizontalToVerticalFieldOfView(
-            Camera.VerticalToHorizontalFieldOfView(65f + standFraming * 4f, 16f / 9f), aspect);
+            Camera.VerticalToHorizontalFieldOfView(69f + standFraming * 4f, 16f / 9f), aspect);
+        // Leave room for conversation on the left without moving the camera away from the player's eyes.
+        seatCamera.ResetProjectionMatrix();
+        var projection = seatCamera.projectionMatrix;
+        projection.m02 -= .16f;
+        seatCamera.projectionMatrix = projection;
         for (int i = 0; i < grips.Length; i++)
         {
             float push = chips.PushTime(i);
@@ -204,6 +217,8 @@ public sealed class Play2TablePreview : MonoBehaviour
         if (!showdown)
         {
             Showdown = ShowdownBeat.None;
+            openedHands = 0;
+            revealOrder = Array.Empty<int>();
             awards = Array.Empty<Play2SettlementSummary.ShowdownAward>();
             AwardIndex = 0;
         }
@@ -211,6 +226,8 @@ public sealed class Play2TablePreview : MonoBehaviour
         {
             Showdown = sameHand ? ShowdownBeat.Waiting : ShowdownBeat.Finished;
             awards = Play2SettlementSummary.ShowdownAwards(game);
+            revealOrder = Play2SettlementSummary.RevealOrder(packet);
+            openedHands = sameHand ? 0 : revealOrder.Length;
             AwardIndex = 0;
         }
         atmosphere.Present(packet, Showdown, HighlightSeats);
@@ -234,7 +251,7 @@ public sealed class Play2TablePreview : MonoBehaviour
             bool own = seat.seat == viewer;
             int player = seat.seat - 1;
             bool folded = seat.status == (int)HoldemSeatStatus.Folded;
-            bool revealed = Showdown != ShowdownBeat.Waiting && Play2SettlementSummary.IsPublicHand(seat);
+            bool revealed = IsHandShown(seat.seat) && Play2SettlementSummary.IsPublicHand(seat);
             bool showFaces = own && !folded;
             if (showFaces && seat.visibleCards.Length < 2) continue;
             if (!dealtSeats.Add(seat.seat))
@@ -271,13 +288,15 @@ public sealed class Play2TablePreview : MonoBehaviour
         {
             case ShowdownBeat.Waiting:
                 if (IsDealing || IsBetting) return;
-                foreach (var seat in state.game.seats)
-                    if (Play2SettlementSummary.IsPublicHand(seat))
-                        grips[seat.seat - 1]?.Reveal(seat.visibleCards[0], seat.visibleCards[1]);
                 Showdown = ShowdownBeat.Reveal;
-                beatUntil = Time.unscaledTime + 1.05f;
+                RevealNextHand();
                 break;
             case ShowdownBeat.Reveal when Time.unscaledTime >= beatUntil:
+                if (openedHands < revealOrder.Length)
+                {
+                    RevealNextHand();
+                    break;
+                }
                 Showdown = ShowdownBeat.Award;
                 beatUntil = Time.unscaledTime + 1.6f;
                 reactions.Celebrate(state);
@@ -298,6 +317,16 @@ public sealed class Play2TablePreview : MonoBehaviour
                 return;
         }
         atmosphere.Present(state, Showdown, HighlightSeats);
+    }
+
+    private void RevealNextHand()
+    {
+        if (openedHands >= revealOrder.Length) { beatUntil = Time.unscaledTime; return; }
+        int next = revealOrder[openedHands++];
+        var seat = state.game.seats.First(s => s.seat == next);
+        grips[next - 1]?.Reveal(seat.visibleCards[0], seat.visibleCards[1]);
+        tableAudio.CardSlide();
+        beatUntil = Time.unscaledTime + .90f;
     }
 
     private void LiftWinningCards()
@@ -323,7 +352,7 @@ public sealed class Play2TablePreview : MonoBehaviour
         card.transform.Find("Front").GetComponent<MeshRenderer>().sharedMaterial = cardFaceMaterial;
         cards.Add(card);
         if (own) SetCardValue(card, cardId);
-        else card.transform.Find("Front").gameObject.SetActive(false);
+        card.transform.Find("Front").gameObject.SetActive(false);
         card.transform.localScale = Vector3.one * (own ? 1.40f : 1.10f);
         card.gameObject.SetActive(false);
         return card;
@@ -354,7 +383,9 @@ public sealed class Play2TablePreview : MonoBehaviour
 
         var pose = card.transform;
         Quaternion boardFacing = Quaternion.Euler(0f, seatCamera.transform.eulerAngles.y, 0f);
-        Vector3 end = boardFacing * new Vector3((index - 2) * .164f, 0.012f, -0.045f);
+        // Rest the near edge on the felt and raise the far edge towards this seat.
+        Quaternion shown = boardFacing * Quaternion.Euler(-14f, 0, 0);
+        Vector3 end = boardFacing * new Vector3((index - 2) * .164f, .028f, -.045f);
         Vector3 start = tabletop.InverseTransformPoint(DealOrigin);
         pose.localScale = Vector3.one * 1.65f;
         pose.localPosition = start;
@@ -368,10 +399,10 @@ public sealed class Play2TablePreview : MonoBehaviour
         var back = pose.localRotation;
         for (float t = 0; t < 1; t += Time.deltaTime / .27f)
         {
-            pose.localRotation = Quaternion.Slerp(back, boardFacing, Mathf.SmoothStep(0, 1, t));
+            pose.localRotation = Quaternion.Slerp(back, shown, Mathf.SmoothStep(0, 1, t));
             yield return null;
         }
-        pose.localRotation = boardFacing;
+        pose.localRotation = shown;
         yield return new WaitForSeconds(BoardDealDuration - .81f);
         boardCards[index] = card;
         UpdateRequestMarker(index);

@@ -106,22 +106,22 @@ public sealed class Play2RoomSession : MonoBehaviour
         }
     }
 
+    private sealed class PracticeRandom : IRandomSource
+    {
+        private readonly System.Random generator = new System.Random();
+        public int NextInt(int exclusiveMax) => generator.Next(exclusiveMax);
+    }
+
+    private readonly HoldemNpcPolicy practicePolicy = new HoldemNpcPolicy(32);
+    private readonly PracticeRandom practiceRandom = new PracticeRandom();
+
     internal bool PlayPreviewOpponent()
     {
         var game = state?.game;
         if (preview == null || game == null || game.currentSeat <= 1 || game.dealPending
             || game.revealPending || game.hasResult) return false;
         Guid actor = previewSeats[game.currentSeat - 1];
-        if (!preview.TryCreateProjection(actor, out var packet) || !packet.game.hasLegal) return false;
-        var legal = packet.game.legal;
-        if (!legal.check && !legal.call) return false;
-
-        var request = PreviewRequest("act");
-        request.handId = game.handId;
-        request.version = game.version;
-        request.action = (int)(legal.check ? BettingActionKind.Check : BettingActionKind.Call);
-        preview.Dispatch(actor, request);
-        return true;
+        return preview.TryPlayPracticeOpponent(actor, practicePolicy, practiceRandom);
     }
 
     internal bool Submit(HoldemWireRequest request)

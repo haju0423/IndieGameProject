@@ -14,21 +14,26 @@ public sealed partial class Play2FingerRig : MonoBehaviour
     {
         public Vector3 Base, Bend, Tip, BaseAxis, BendAxis;
         public Transform Proximal, Distal;
-        public int BoneIndex;
+        public int BoneIndex, DistalBoneIndex;
+        public Quaternion BaseRest = Quaternion.identity, BendRest = Quaternion.identity;
+        public Quaternion BaseInWrist = Quaternion.identity, BendInWrist = Quaternion.identity;
+        public Vector3 PadOffset;
+        public Quaternion BasePose(Quaternion delta) => BaseRest * Quaternion.Inverse(BaseInWrist) * delta * BaseInWrist;
+        public Quaternion BendPose(Quaternion delta) => BendRest * Quaternion.Inverse(BendInWrist) * delta * BendInWrist;
         public bool Thumb;
 
         public Finger ForBones(Transform[] bones)
         {
             var copy = (Finger)MemberwiseClone();
             copy.Proximal = bones[BoneIndex];
-            copy.Distal = bones[BoneIndex + 1];
+            copy.Distal = bones[DistalBoneIndex];
             return copy;
         }
 
         public void Curl(float amount)
         {
-            Proximal.localRotation = Quaternion.AngleAxis(amount * (Thumb ? 18f : 32f), BaseAxis);
-            Distal.localRotation = Quaternion.AngleAxis(amount * (Thumb ? 14f : 26f), BendAxis);
+            Proximal.localRotation = BaseRest * Quaternion.AngleAxis(amount * (Thumb ? 18f : 32f), BaseAxis);
+            Distal.localRotation = BendRest * Quaternion.AngleAxis(amount * (Thumb ? 14f : 26f), BendAxis);
         }
     }
 
@@ -40,9 +45,16 @@ public sealed partial class Play2FingerRig : MonoBehaviour
             renderer.updateWhenOffscreen = true;
         if (animator.TryGetComponent(out Play2FingerRig rig)) return rig;
         var skin = animator.GetComponentInChildren<SkinnedMeshRenderer>(true);
-        if (skin == null || !TryGetHands(skin.sharedMesh.name, out var left, out var right)) return null;
+        if (skin == null) return null;
+        if (TryGetHands(skin.sharedMesh.name, out var left, out var right))
+        {
+            rig = animator.gameObject.AddComponent<Play2FingerRig>();
+            rig.Bind(animator, skin, left, right);
+            return rig;
+        }
+        if (!TryGetAuthoredHands(animator, skin, out var authored)) return null;
         rig = animator.gameObject.AddComponent<Play2FingerRig>();
-        rig.Bind(animator, skin, left, right);
+        rig.hands = authored;
         return rig;
     }
 
@@ -53,6 +65,13 @@ public sealed partial class Play2FingerRig : MonoBehaviour
         var skin = GetComponentInChildren<SkinnedMeshRenderer>(true);
         var bones = skin.bones;
         hands = Array.ConvertAll(original.hands, hand => Array.ConvertAll(hand, finger => finger.ForBones(bones)));
+        PrepareViewMesh(skin);
+    }
+
+    // View masking edits triangles, so it needs an independently owned mesh.
+    internal void PrepareViewMesh(SkinnedMeshRenderer skin)
+    {
+        if (riggedMesh != null) return;
         riggedMesh = Instantiate(skin.sharedMesh);
         skin.sharedMesh = riggedMesh;
     }
@@ -81,12 +100,19 @@ public sealed partial class Play2FingerRig : MonoBehaviour
             * Quaternion.Inverse(Quaternion.LookRotation(thumbDirection, normal));
     }
 
-    internal Quaternion PointingRotation(bool left, Vector3 direction)
+    internal Quaternion PointingRotation(bool left, Vector3 direction, Vector3 backFacing = default)
     {
         var hand = hands[left ? 0 : 1];
         var index = hand[1];
-        var local = Quaternion.LookRotation(index.Bend - index.Base, hand[0].Base - index.Base);
-        return Quaternion.LookRotation(direction, Vector3.up) * Quaternion.Inverse(local);
+        Vector3 length = index.Bend - index.Base;
+        if (backFacing.sqrMagnitude < .0001f)
+            return Quaternion.LookRotation(direction, Vector3.up)
+                * Quaternion.Inverse(Quaternion.LookRotation(length, hand[0].Base - index.Base));
+        Vector3 dorsal = Vector3.Cross(length, hand[hand.Length - 1].Base - index.Base) * (left ? -1f : 1f);
+        Vector3 up = Vector3.ProjectOnPlane(backFacing, direction);
+        if (up.sqrMagnitude < .0001f) up = Vector3.ProjectOnPlane(Vector3.up, direction);
+        return Quaternion.LookRotation(direction, up)
+            * Quaternion.Inverse(Quaternion.LookRotation(length, dorsal));
     }
 
     public void SetFingerCurl(bool left, int finger, float curl)
@@ -103,7 +129,7 @@ public sealed partial class Play2FingerRig : MonoBehaviour
     {
         var digit = hands[left ? 0 : 1][finger];
         var straight = Quaternion.FromToRotation(digit.Tip - digit.Bend, digit.Bend - digit.Base);
-        digit.Distal.localRotation = Quaternion.Slerp(Quaternion.identity, straight, amount);
+        digit.Distal.localRotation = digit.BendPose(Quaternion.Slerp(Quaternion.identity, straight, amount));
     }
 
     internal void FoldThumb(bool left, float amount, bool tuck = false)
@@ -112,8 +138,8 @@ public sealed partial class Play2FingerRig : MonoBehaviour
         var thumb = hand[0];
         Vector3 target = hand[tuck ? 2 : 1].Base;
         var folded = Quaternion.FromToRotation(thumb.Tip - thumb.Base, target - thumb.Base);
-        thumb.Proximal.localRotation = Quaternion.RotateTowards(Quaternion.identity, folded, 45f * amount);
-        thumb.Distal.localRotation = Quaternion.AngleAxis(25f * amount, thumb.BendAxis);
+        thumb.Proximal.localRotation = thumb.BasePose(Quaternion.RotateTowards(Quaternion.identity, folded, 45f * amount));
+        thumb.Distal.localRotation = thumb.BendRest * Quaternion.AngleAxis(25f * amount, thumb.BendAxis);
     }
 
     internal void ExtendThumb(bool left, float amount)
@@ -122,7 +148,7 @@ public sealed partial class Play2FingerRig : MonoBehaviour
         var thumb = hand[0];
         Vector3 lateral = Vector3.ProjectOnPlane(thumb.Base - hand[2].Base, hand[2].Bend - hand[2].Base);
         var rotation = Quaternion.FromToRotation(thumb.Bend - thumb.Base, lateral);
-        thumb.Proximal.localRotation = Quaternion.Slerp(Quaternion.identity, rotation, amount);
+        thumb.Proximal.localRotation = thumb.BasePose(Quaternion.Slerp(Quaternion.identity, rotation, amount));
         ExtendFinger(left, 0, amount);
     }
 
@@ -154,7 +180,7 @@ public sealed partial class Play2FingerRig : MonoBehaviour
     }
 
     private static Vector3 Pad(Finger finger) =>
-        finger.Distal.TransformPoint((finger.Tip - finger.Bend) * 0.62f);
+        finger.Distal.TransformPoint(finger.PadOffset);
 
     private void Bind(Animator animator, SkinnedMeshRenderer skin, Finger[] left, Finger[] right)
     {
@@ -175,6 +201,8 @@ public sealed partial class Play2FingerRig : MonoBehaviour
                 var finger = hands[side][i];
                 string label = i == 0 ? "Thumb" : "Finger" + i;
                 finger.BoneIndex = bones.Count;
+                finger.DistalBoneIndex = bones.Count + 1;
+                finger.PadOffset = (finger.Tip - finger.Bend) * 0.62f;
                 finger.Proximal = CreateJoint(wrist, label + " Proximal", finger.Base);
                 finger.Distal = CreateJoint(finger.Proximal, label + " Distal", finger.Bend - finger.Base);
                 bones.Add(finger.Proximal);

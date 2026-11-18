@@ -25,7 +25,7 @@ internal sealed partial class Play2TableHud
     private readonly RectTransform showdownCaption;
     private readonly TextMeshProUGUI showdownTitle, showdownDetail;
     private Play2TablePreview.ShowdownBeat lastBeat;
-    private int lastAwardIndex;
+    private int lastAwardIndex, lastRevealingSeat;
     private readonly Play2InGameSettings settings;
     private readonly TextMeshProUGUI[] seatLabels = new TextMeshProUGUI[4], seatStacks = new TextMeshProUGUI[4];
     private readonly UnityEngine.UI.Image[] actionRows = new UnityEngine.UI.Image[4];
@@ -37,7 +37,6 @@ internal sealed partial class Play2TableHud
     private Reservation reservation;
     private long quotedCall, reservedCall;
     private readonly CanvasGroup baseActions;
-    private readonly RectTransform freeFold;
     private TextMeshProUGUI betCommit;
     private readonly int[] potPercents = { 33, 50, 100, 200 };
     private readonly UnityEngine.UI.Button[] potButtons = new UnityEngine.UI.Button[4];
@@ -53,7 +52,7 @@ internal sealed partial class Play2TableHud
     private Coroutine feedbackRoutine;
     private readonly HashSet<string> shownNotices = new HashSet<string>();
     private bool wasDealing, wasSettlementReady, wasActionPending;
-    private const float VerdictReadTime = 2.6f;
+    private const float VerdictReadTime = 5.5f;
     private float settlementRevealUntil, noticeUntil;
     private bool announceSettlement;
     private int[] suspects = Array.Empty<int>();
@@ -153,7 +152,6 @@ internal sealed partial class Play2TableHud
         feedbackPanel.gameObject.SetActive(false);
         handGuide = new Play2HandGuide(root, font);
         (sizing, betHand, target, betHeading, betAdjustments, allInOption) = BuildBetPicker(root, font);
-        freeFold = BuildFreeFold(root, font);
         (accusation, accusationHand, suspectPlates, suspectNames) = BuildAccusationPicker(root, font);
         showdownCaption = Play2HudArt.Plate("Showdown Caption", root, new Vector2(-190, 65), new Vector2(344, 82), "PlayingBadge");
         showdownCaption.anchorMin = showdownCaption.anchorMax = Vector2.right;
@@ -216,7 +214,7 @@ internal sealed partial class Play2TableHud
             && (!wasSettlementReady || packet?.game.hasResult != true);
         if (ReferenceEquals(packet, value) && lastStatus == status && wasDealing == dealing
             && wasSettlementReady == settlementReady && wasActionPending == actionPending && lastBeat == beat
-            && lastAwardIndex == table.AwardIndex) return;
+            && lastAwardIndex == table.AwardIndex && lastRevealingSeat == table.RevealingSeat) return;
         bool awaitingWinner = beforeAward || (value.game.hasResult && !settlementReady && beat == Play2TablePreview.ShowdownBeat.None);
         var previousPacket = packet;
         var previous = previousPacket?.game;
@@ -232,6 +230,7 @@ internal sealed partial class Play2TableHud
         packet = value; lastStatus = status;
         lastBeat = beat;
         lastAwardIndex = table.AwardIndex;
+        lastRevealingSeat = table.RevealingSeat;
         wasDealing = dealing;
         wasSettlementReady = settlementReady;
         root.gameObject.SetActive(true);
@@ -240,7 +239,7 @@ internal sealed partial class Play2TableHud
         if (showingHands)
         {
             showdownTitle.text = "쇼다운";
-            showdownDetail.text = "핸드 공개";
+            showdownDetail.text = table.RevealingSeat > 0 ? $"{Name(table.RevealingSeat)} 패 공개" : "패 공개";
         }
         else if (showingAwards)
         {
@@ -273,7 +272,7 @@ internal sealed partial class Play2TableHud
                 : beforeAward && seat.status == (int)HoldemSeatStatus.Busted && Play2SettlementSummary.IsPublicHand(seat) ? "올인"
                 : seat.status == (int)HoldemSeatStatus.Busted ? "탈락"
                 : seat.streetContribution > 0 ? $"베팅 {seat.streetContribution}칩" : "";
-            if (game.hasResult && beat != Play2TablePreview.ShowdownBeat.Waiting && !seat.viewer && seat.revealedBestCards?.Length == 5)
+            if (game.hasResult && table.IsHandShown(seat.seat) && !seat.viewer && seat.revealedBestCards?.Length == 5)
             {
                 var valueOfHand = HandEvaluator.Evaluate(seat.revealedBestCards.Select(Poker.Foundation.Card.FromId).ToArray());
                 seatStates[i].text = Play2HandGuide.CategoryLabel(valueOfHand);
@@ -405,7 +404,7 @@ internal sealed partial class Play2TableHud
                 point.y += (seatPanels[i].rect.height / 2 + 8) / root.rect.height;
                 float width = root.rect.width;
                 bool nearMenu = point.x * width < 196 || (1 - point.x) * width < 244;
-                float topMargin = nearMenu ? 89 : 39;
+                float topMargin = nearMenu ? 93 : 46;
                 // Reserve the notice lane even while it is empty so a verdict never moves the nameplate.
                 float plateX = Mathf.Clamp((point.x - .5f) * width, root.rect.xMin + 101, root.rect.xMax - 101);
                 if (Mathf.Abs(plateX) < (noticePanel.rect.width + seatPanels[i].rect.width) / 2 + 6)
@@ -439,13 +438,6 @@ internal sealed partial class Play2TableHud
             return;
         }
 
-        if (freeFold.gameObject.activeSelf)
-        {
-            if (keyboard.escapeKey.wasPressedThisFrame) CloseActionPanels();
-            else if (keyboard.eKey.wasPressedThisFrame) Act(BettingActionKind.Check);
-            else if (keyboard.fKey.wasPressedThisFrame) Act(BettingActionKind.Fold);
-            return;
-        }
         bool selecting = sizing.gameObject.activeSelf || accusation.gameObject.activeSelf;
         if (!selecting && keyboard.escapeKey.wasPressedThisFrame)
         {
@@ -491,13 +483,7 @@ internal sealed partial class Play2TableHud
             return;
         }
         if (!acting) return;
-        if (index == 0 && packet.game.legal.check)
-        {
-            ClearSelection();
-            freeFold.gameObject.SetActive(true);
-            SetPickerOpen(true);
-        }
-        else if (index == 0) Act(BettingActionKind.Fold);
+        if (index == 0) Act(BettingActionKind.Fold);
         else if (index == 1) Act(packet.game.legal.check ? BettingActionKind.Check : BettingActionKind.Call);
         else if (index == 2)
         {
@@ -702,7 +688,6 @@ internal sealed partial class Play2TableHud
     {
         sizing.gameObject.SetActive(false);
         accusation.gameObject.SetActive(false);
-        freeFold.gameObject.SetActive(false);
         SetPickerOpen(false);
     }
 

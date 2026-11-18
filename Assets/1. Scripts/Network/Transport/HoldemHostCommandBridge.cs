@@ -365,6 +365,21 @@ namespace Poker.Transport
             }
         }
 
+        // Used only by the local practice table. Each opponent receives its own private view.
+        public bool TryPlayPracticeOpponent(Guid connection, HoldemNpcPolicy policy, IRandomSource decisionRandom)
+        {
+            lock (gate)
+            {
+                ThrowIfDisposed();
+                if (!bindings.ContainsKey(connection)) return false;
+                var view = room.Read(connection).Game;
+                if (view == null || view.LegalActions == null) return false;
+                var action = policy.Choose(view, decisionRandom);
+                return room.Submit(connection, new HoldemRoomAction(view.SessionId, view.HandId,
+                    Guid.NewGuid(), view.SessionVersion, action)).Accepted;
+            }
+        }
+
         /// <summary>Create a detached packet for exactly one admitted connection.</summary>
         public bool TryCreateProjection(Guid senderConnection, out HoldemRoomPacket packet,
             long afterRevision = -1, int afterDesignationRevision = -1, long afterEliminatedSpeechRevision = -1)
