@@ -90,7 +90,7 @@ public sealed class Play2Lobby : MonoBehaviour
         lastPending = pending;
 
         int count = packet.rules.seatCapacity;
-        roomLabel.text = session.IsLocal ? "로컬 프리뷰" : session.RoomCode + "  ·  " + packet.members.Length + "/" + count;
+        roomLabel.text = session.IsLocal ? "혼자 연습하기" : session.RoomCode + "  ·  " + packet.members.Length + "/" + count;
         Show(copy, !session.IsLocal);
         bool allReady = packet.members.Length == count && packet.members.All(member => member.connected && member.ready);
         var mine = packet.members.FirstOrDefault(member => member.seat == packet.viewerSeat);
@@ -100,7 +100,7 @@ public sealed class Play2Lobby : MonoBehaviour
         start.SetEnabled(allReady && !pending);
         start.text = pending ? "시작 중" : "게임 시작";
         lobbyDetail.text = !string.IsNullOrEmpty(status) ? status
-            : session.IsLocal ? "네 좌석의 카드 배분을 연습합니다."
+            : session.IsLocal ? "게임을 시작하면 연습 상대 세 명과 플레이합니다."
             : allReady ? "모두 준비되었습니다."
             : packet.members.Length < count ? "플레이어가 들어오기를 기다리는 중"
             : "모든 플레이어가 준비하면 방장이 시작할 수 있습니다.";

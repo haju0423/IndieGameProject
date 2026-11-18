@@ -13,12 +13,11 @@ public sealed class Play2TablePreview : MonoBehaviour
 {
     internal enum ShowdownBeat { None, Waiting, Reveal, Award, Finished }
     internal ShowdownBeat Showdown { get; private set; }
-    internal int[] HighlightSeats => awardGroups.Length == 0 ? Array.Empty<int>() : awardGroups[awardIndex];
+    internal int AwardIndex { get; private set; }
+    internal Play2SettlementSummary.ShowdownAward CurrentAward => awards.Length == 0 ? null : awards[AwardIndex];
+    internal int[] HighlightSeats => CurrentAward?.Seats ?? Array.Empty<int>();
     internal int HighlightSeat => HighlightSeats.Length == 0 ? 0 : HighlightSeats[0];
-    internal int AwardCount => awardSeats.Length;
-    private int[] awardSeats = Array.Empty<int>();
-    private int[][] awardGroups = Array.Empty<int[]>();
-    private int awardIndex;
+    private Play2SettlementSummary.ShowdownAward[] awards = Array.Empty<Play2SettlementSummary.ShowdownAward>();
     private Play2ShowdownCards showdownCards;
     private float beatUntil;
     private readonly Play2AllInPosture[] postures = new Play2AllInPosture[4];
@@ -194,21 +193,14 @@ public sealed class Play2TablePreview : MonoBehaviour
         if (!showdown)
         {
             Showdown = ShowdownBeat.None;
-            awardSeats = Array.Empty<int>();
-            awardGroups = Array.Empty<int[]>();
-            awardIndex = 0;
+            awards = Array.Empty<Play2SettlementSummary.ShowdownAward>();
+            AwardIndex = 0;
         }
         else if (!sameHand || !previous.game.hasResult)
         {
             Showdown = sameHand ? ShowdownBeat.Waiting : ShowdownBeat.Finished;
-            // Pot order lets the main pot be seen first when side pots have other winners.
-            var publicWinners = game.seats.Where(s => s.awarded > 0 && Play2SettlementSummary.IsPublicHand(s)).Select(s => s.seat).ToArray();
-            awardSeats = (game.result.pots ?? Array.Empty<HoldemPotPacket>())
-                .SelectMany(pot => pot?.payouts ?? Array.Empty<HoldemPayoutPacket>()).Where(p => p != null && p.amount > 0 && Array.IndexOf(publicWinners, p.seat) >= 0)
-                .Select(p => p.seat).Concat(publicWinners).Distinct().ToArray();
-            awardGroups = awardSeats.GroupBy(id => game.seats.First(seat => seat.seat == id).revealedBestCards
-                .Aggregate(0UL, (mask, card) => mask | 1UL << card)).Select(group => group.ToArray()).ToArray();
-            awardIndex = 0;
+            awards = Play2SettlementSummary.ShowdownAwards(game);
+            AwardIndex = 0;
         }
         atmosphere.Present(packet, Showdown, HighlightSeats);
         for (int i = 0; i < postures.Length; i++)
@@ -280,15 +272,15 @@ public sealed class Play2TablePreview : MonoBehaviour
                 reactions.Celebrate(state);
                 break;
             case ShowdownBeat.Award when Time.unscaledTime >= beatUntil:
-                if (awardIndex + 1 < awardGroups.Length)
+                if (AwardIndex + 1 < awards.Length)
                 {
-                    awardIndex++;
+                    AwardIndex++;
                     beatUntil = Time.unscaledTime + 1.45f;
                 }
                 else
                 {
                     Showdown = ShowdownBeat.Finished;
-                    awardIndex = 0;
+                    AwardIndex = 0;
                 }
                 break;
             default:

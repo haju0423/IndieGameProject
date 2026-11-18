@@ -279,9 +279,10 @@ public sealed class Play2RoomSession : MonoBehaviour
         var analyzer = CreateRoomAnalyzer(hostAnalyzer);
         if (analyzer != null) analyzer.gameObject.SetActive(true);
         previewDealer = new HoldemLlmTableDealer(preview, analyzer);
+        string[] opponents = { "황소", "고양이", "부엉이" };
         for (int i = 0; i < previewSeats.Length; i++)
         {
-            var identity = i == 0 ? host : new HoldemClientIdentity("Preview " + (i + 1));
+            var identity = i == 0 ? host : new HoldemClientIdentity(opponents[i - 1]);
             previewSeats[i] = Guid.NewGuid();
             preview.Dispatch(previewSeats[i], identity.AdmissionRequest());
             preview.Dispatch(previewSeats[i], PreviewRequest("ready"));

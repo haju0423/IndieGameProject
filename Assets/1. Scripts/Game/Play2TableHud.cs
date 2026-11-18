@@ -25,7 +25,7 @@ internal sealed partial class Play2TableHud
     private readonly RectTransform showdownCaption;
     private readonly TextMeshProUGUI showdownTitle, showdownDetail;
     private Play2TablePreview.ShowdownBeat lastBeat;
-    private int lastHighlightSeat;
+    private int lastAwardIndex;
     private readonly Play2InGameSettings settings;
     private readonly TextMeshProUGUI[] seatLabels = new TextMeshProUGUI[4], seatStacks = new TextMeshProUGUI[4];
     private readonly UnityEngine.UI.Image[] actionRows = new UnityEngine.UI.Image[4];
@@ -216,7 +216,7 @@ internal sealed partial class Play2TableHud
             && (!wasSettlementReady || packet?.game.hasResult != true);
         if (ReferenceEquals(packet, value) && lastStatus == status && wasDealing == dealing
             && wasSettlementReady == settlementReady && wasActionPending == actionPending && lastBeat == beat
-            && lastHighlightSeat == table.HighlightSeat) return;
+            && lastAwardIndex == table.AwardIndex) return;
         bool awaitingWinner = beforeAward || (value.game.hasResult && !settlementReady && beat == Play2TablePreview.ShowdownBeat.None);
         var previousPacket = packet;
         var previous = previousPacket?.game;
@@ -231,7 +231,7 @@ internal sealed partial class Play2TableHud
         bool firstAward = showingAwards && lastBeat != Play2TablePreview.ShowdownBeat.Award;
         packet = value; lastStatus = status;
         lastBeat = beat;
-        lastHighlightSeat = table.HighlightSeat;
+        lastAwardIndex = table.AwardIndex;
         wasDealing = dealing;
         wasSettlementReady = settlementReady;
         root.gameObject.SetActive(true);
@@ -246,16 +246,8 @@ internal sealed partial class Play2TableHud
         {
             var paid = game.seats.FirstOrDefault(seat => seat.seat == table.HighlightSeat);
             showdownTitle.text = paid == null ? "쇼다운" : Play2HandGuide.CategoryLabel(Play2SettlementSummary.Value(paid));
-            string outcome = table.AwardCount <= 1 ? "승리" : game.result.pots?.Length == 1 ? "공동 승리" : "팟 획득";
-            var group = table.HighlightSeats;
-            if (group.Length > 1)
-            {
-                string winners = group.Length == game.seats.Count(seat => seat.dealtIn) ? $"{group.Length}명"
-                    : string.Join(", ", group.Select(DisplayName));
-                bool equalShares = game.seats.Where(seat => Array.IndexOf(group, seat.seat) >= 0).All(seat => seat.awarded == paid.awarded);
-                showdownDetail.text = winners + " " + outcome + (equalShares ? $"    각 +{paid.awarded}칩" : "");
-            }
-            else showdownDetail.text = paid == null ? "" : $"{Name(paid.seat)} {outcome}    +{paid.awarded}칩";
+            var award = table.CurrentAward;
+            showdownDetail.text = award == null ? "" : award.Caption(game, DisplayName);
         }
         if (previous?.handId != game.handId)
         {
@@ -271,7 +263,9 @@ internal sealed partial class Play2TableHud
             var seat = game.seats.FirstOrDefault(s => s.seat == i + 1);
             seatPanels[i].gameObject.SetActive(seat != null);
             if (seat == null) continue;
-            long shownStack = awaitingWinner ? Math.Max(0L, seat.stack - seat.awarded) : seat.stack;
+            long displayedAward = showingAwards && table.CurrentAward != null
+                ? table.CurrentAward.PayoutThroughThisPot(game, seat.seat) : awaitingWinner ? 0L : seat.awarded;
+            long shownStack = seat.stack - seat.awarded + displayedAward;
             seatLabels[i].text = seat.viewer ? "" : Name(seat.seat);
             seatStacks[i].text = seat.viewer ? $"내 칩  {shownStack}" : $"{shownStack}칩";
             seatStates[i].text = seat.status == (int)HoldemSeatStatus.Folded ? "폴드"
@@ -284,9 +278,9 @@ internal sealed partial class Play2TableHud
                 var valueOfHand = HandEvaluator.Evaluate(seat.revealedBestCards.Select(Poker.Foundation.Card.FromId).ToArray());
                 seatStates[i].text = Play2HandGuide.CategoryLabel(valueOfHand);
             }
-            bool won = game.hasResult && !awaitingWinner && seat.awarded > 0;
+            bool won = game.hasResult && displayedAward > 0;
             if (won) seatStates[i].text = (string.IsNullOrEmpty(seatStates[i].text) ? "승리" : seatStates[i].text)
-                + "  +" + seat.awarded + "칩";
+                + "  +" + displayedAward + "칩";
             if (seat.viewer && !won && (seat.status == (int)HoldemSeatStatus.Folded || seat.status == (int)HoldemSeatStatus.Busted))
                 seatStates[i].text = "";
             bool hasTurn = seat.currentActor && !game.hasResult && !packet.paused

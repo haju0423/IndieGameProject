@@ -6,9 +6,9 @@
             <ui:VisualElement class="title-logo" tooltip="One More Card" picking-mode="Ignore" />
             <ui:Button name="host" text="방 만들기" class="menu-button featured" />
             <ui:Button name="join" text="방 참여" class="menu-button" />
+            <ui:Button name="local" text="혼자 연습하기" class="menu-button" />
             <ui:Button name="settings" text="설정" class="menu-button" />
             <ui:Button name="quit" text="게임 종료" class="menu-button quiet" />
-            <ui:Button name="local" text="로컬 프리뷰" class="menu-button preview" />
             <ui:Label name="notice" class="title-notice" picking-mode="Ignore" />
         </ui:VisualElement>
         <ui:VisualElement name="form" class="title-modal title-hidden">

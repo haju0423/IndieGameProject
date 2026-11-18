@@ -8,6 +8,62 @@ internal static class Play2SettlementSummary
     internal static bool IsPublicHand(HoldemSeatPacket seat) =>
         seat.status != (int)HoldemSeatStatus.Folded && seat.visibleCards?.Length == 2 && seat.revealedBestCards?.Length == 5;
 
+    internal sealed class ShowdownAward
+    {
+        internal int PotIndex;
+        internal HoldemPotPacket Pot;
+        internal int[] Seats;
+
+        internal long PayoutThroughThisPot(HoldemGamePacket game, int seat)
+        {
+            var pots = game.result.pots;
+            if (pots == null || pots.Length == 0) return Pot.payouts.Where(p => p.seat == seat).Sum(p => p.amount);
+            return pots.Take(PotIndex + 1).Where(p => p?.payouts != null)
+                .SelectMany(p => p.payouts).Where(p => p != null && p.seat == seat).Sum(p => p.amount);
+        }
+
+        internal string Caption(HoldemGamePacket game, Func<int, string> name)
+        {
+            var group = Seats;
+            var payouts = Pot.payouts.Where(p => p != null && p.amount > 0).ToArray();
+            var shown = payouts.Where(p => Array.IndexOf(group, p.seat) >= 0).ToArray();
+            string players = group.Length == 1 ? name(group[0])
+                : group.Length == game.seats.Count(seat => seat.dealtIn) ? $"{group.Length}명"
+                : string.Join(", ", group.Select(name));
+            string potName = game.result.pots?.Length > 1
+                ? PotIndex == 0 ? "메인 팟 " : $"사이드 팟 {PotIndex} " : "";
+            string outcome = payouts.Length > 1 ? "공동 승리" : "승리";
+            string share = shown.Length == 1 ? $"+{shown[0].amount}칩"
+                : shown.All(p => p.amount == shown[0].amount) ? $"각 +{shown[0].amount}칩"
+                : $"{shown.Sum(p => p.amount)}칩 분배";
+            return $"{potName}{players} {outcome}   {share}";
+        }
+    }
+
+    internal static ShowdownAward[] ShowdownAwards(HoldemGamePacket game)
+    {
+        var hands = game.seats.Where(IsPublicHand).ToDictionary(seat => seat.seat);
+        var pots = game.result.pots ?? Array.Empty<HoldemPotPacket>();
+        if (pots.Length == 0)
+        {
+            // Earlier snapshots may contain only the total awarded to each seat.
+            pots = new[] { new HoldemPotPacket { amount = game.pot, payouts = game.seats.Where(s => s.awarded > 0)
+                .Select(s => new HoldemPayoutPacket { seat = s.seat, amount = s.awarded }).ToArray() } };
+        }
+
+        var awards = new System.Collections.Generic.List<ShowdownAward>();
+        for (int i = 0; i < pots.Length; i++)
+        {
+            var pot = pots[i];
+            if (pot?.payouts == null) continue;
+            var winners = pot.payouts.Where(p => p != null && p.amount > 0 && hands.ContainsKey(p.seat));
+            // Physical cards may differ in a tie. Show each distinct five within its own pot.
+            foreach (var group in winners.GroupBy(p => hands[p.seat].revealedBestCards.Aggregate(0UL, (mask, card) => mask | 1UL << card)))
+                awards.Add(new ShowdownAward { PotIndex = i, Pot = pot, Seats = group.Select(p => p.seat).ToArray() });
+        }
+        return awards.ToArray();
+    }
+
     internal static HandValue Value(HoldemSeatPacket seat) =>
         HandEvaluator.Evaluate(seat.revealedBestCards.Select(Poker.Foundation.Card.FromId).ToArray());
 
