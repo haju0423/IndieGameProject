@@ -34,6 +34,7 @@ internal sealed class Play2InGameSettings
     private readonly UnityEngine.UI.Image fullscreenIcon;
     private readonly TextMeshProUGUI volumeValue;
     private bool fullscreen;
+    private readonly UnityEngine.UI.Image outdoorMap, indoorMap;
 
     internal bool IsOpen => overlay.gameObject.activeSelf;
 
@@ -41,21 +42,22 @@ internal sealed class Play2InGameSettings
     {
         overlay = Play2UGui.Fill("Settings Overlay", parent);
         Play2HudArt.Apply(Play2UGui.Image(overlay, Color.white, true), "Scrim");
-        var panel = Play2HudArt.Plate("Settings Card", overlay, Vector2.zero, new Vector2(524, 268), "CreamPanel", true);
-        Play2HudArt.Plate("Settings Diamond", panel, new Vector2(-33, 96), new Vector2(17, 20), "Diamond");
-        Play2UGui.Text("Heading", panel, "설정", new Vector2(13, 96), new Vector2(64, 32), 27,
+        var panel = Play2HudArt.Plate("Settings Card", overlay, Vector2.zero, new Vector2(524, 352), "CreamPanel", true);
+        Play2HudArt.Plate("Settings Diamond", panel, new Vector2(-33, 138), new Vector2(17, 20), "Diamond");
+        Play2UGui.Text("Heading", panel, "설정", new Vector2(13, 138), new Vector2(64, 32), 27,
             Play2UGui.Ink, font, style: FontStyles.Bold);
-        Play2HudArt.Plate("Header Rule", panel, new Vector2(0, 67), new Vector2(470, 2), "Divider");
-        AddLabel("전체 음량", 30);
-        AddLabel("전체 화면", -28);
-        Play2HudArt.Plate("Volume Rule", panel, new Vector2(0, 0), new Vector2(470, 1), "Divider")
+        Play2HudArt.Plate("Header Rule", panel, new Vector2(0, 109), new Vector2(470, 2), "Divider");
+        AddLabel("전체 음량", 72);
+        AddLabel("전체 화면", 14);
+        AddLabel("맵", -47);
+        Play2HudArt.Plate("Volume Rule", panel, new Vector2(0, 42), new Vector2(470, 1), "Divider")
             .GetComponent<UnityEngine.UI.Image>().color = new Color(1, 1, 1, .4f);
-        volumeValue = Play2UGui.Text("Volume Percentage", panel, "", new Vector2(205, 29), new Vector2(66, 30), 20,
+        volumeValue = Play2UGui.Text("Volume Percentage", panel, "", new Vector2(205, 71), new Vector2(66, 30), 20,
             Play2UGui.Ink, font, TextAlignmentOptions.MidlineRight, FontStyles.Bold);
         volumeValue.textWrappingMode = TextWrappingModes.NoWrap;
         Play2HudArt.Fit(volumeValue, 15);
 
-        var slider = Play2UGui.Rect("Volume Slider", panel, new Vector2(35, 30), new Vector2(260, 36));
+        var slider = Play2UGui.Rect("Volume Slider", panel, new Vector2(35, 72), new Vector2(260, 36));
         Play2HudArt.Plate("Track", slider, Vector2.zero, new Vector2(260, 13), "Track");
         var fillArea = Play2UGui.Fill("Volume Fill Area", slider);
         fillArea.offsetMin = new Vector2(0, 11);
@@ -78,13 +80,17 @@ internal sealed class Play2InGameSettings
             UpdateVolumeLabel(value);
         });
 
-        var screen = Play2HudArt.Button("Fullscreen Switch", panel, "", new Vector2(207, -28), new Vector2(61, 32),
+        var screen = Play2HudArt.Button("Fullscreen Switch", panel, "", new Vector2(207, 14), new Vector2(61, 32),
             "SwitchOff", Play2UGui.Ink, font, ToggleFullscreen);
         fullscreenIcon = (UnityEngine.UI.Image)screen.targetGraphic;
-        Play2HudArt.Plate("Footer Rule", panel, new Vector2(0, -56), new Vector2(470, 1), "Divider")
+        outdoorMap = (UnityEngine.UI.Image)Play2HudArt.Button("Outdoor Map", panel, "기존 맵", new Vector2(27, -47), new Vector2(126, 36),
+            "ActionRow", Play2UGui.Cream, font, () => ChooseMap(false), 17).targetGraphic;
+        indoorMap = (UnityEngine.UI.Image)Play2HudArt.Button("Indoor Map", panel, "어두운 밀실", new Vector2(170, -47), new Vector2(136, 36),
+            "ActionRow", Play2UGui.Cream, font, () => ChooseMap(true), 17).targetGraphic;
+        Play2HudArt.Plate("Footer Rule", panel, new Vector2(0, -91), new Vector2(470, 1), "Divider")
             .GetComponent<UnityEngine.UI.Image>().color = new Color(1, 1, 1, .4f);
-        Play2HudArt.Keycap(panel, font, "Esc", new Vector2(97, -94), 44);
-        Play2HudArt.Button("Close Settings", panel, "닫기", new Vector2(177, -94), new Vector2(120, 42),
+        Play2HudArt.Keycap(panel, font, "Esc", new Vector2(97, -136), 44);
+        Play2HudArt.Button("Close Settings", panel, "닫기", new Vector2(177, -136), new Vector2(120, 42),
             "HeaderBadge", Play2UGui.Cream, font, Close, 20);
         overlay.gameObject.SetActive(false);
 
@@ -99,6 +105,7 @@ internal sealed class Play2InGameSettings
     {
         fullscreen = Play2AudioVideoSettings.Fullscreen;
         UpdateFullscreenIcon();
+        UpdateMapChoice();
         volume.SetValueWithoutNotify(AudioListener.volume);
         UpdateVolumeLabel(volume.value);
         overlay.SetAsLastSibling();
@@ -116,6 +123,21 @@ internal sealed class Play2InGameSettings
         fullscreen = !fullscreen;
         Play2AudioVideoSettings.SetFullscreen(fullscreen);
         UpdateFullscreenIcon();
+    }
+
+    private void ChooseMap(bool indoor)
+    {
+        Play2TableAtmosphere.SelectRoom(indoor);
+        UpdateMapChoice();
+    }
+
+    private void UpdateMapChoice()
+    {
+        bool indoor = Play2TableAtmosphere.DarkRoom;
+        Play2HudArt.Apply(outdoorMap, indoor ? "ActionRow" : "GoldButton");
+        Play2HudArt.Apply(indoorMap, indoor ? "GoldButton" : "ActionRow");
+        outdoorMap.GetComponentInChildren<TMP_Text>().color = indoor ? Play2UGui.Cream : Play2UGui.Ink;
+        indoorMap.GetComponentInChildren<TMP_Text>().color = indoor ? Play2UGui.Ink : Play2UGui.Cream;
     }
 
     private void UpdateFullscreenIcon() => Play2HudArt.Apply(fullscreenIcon, fullscreen ? "SwitchOn" : "SwitchOff");

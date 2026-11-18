@@ -12,21 +12,37 @@ internal sealed partial class Play2TableHud
 {
     private readonly Play2TablePreview table;
     private readonly Play2FrontEnd owner;
-    private readonly RectTransform root, controls, sizing, accusation, betAdjustments, allInOption;
+    private readonly RectTransform root, controls, sizing, accusation, betAdjustments, allInOption, potPanel;
+    private readonly RectTransform[] seatPanels = new RectTransform[4];
+    private readonly TextMeshProUGUI[] seatStates = new TextMeshProUGUI[4];
+    private readonly UnityEngine.UI.Image[] seatTurns = new UnityEngine.UI.Image[4];
+    private readonly UnityEngine.UI.Outline[] seatOutlines = new UnityEngine.UI.Outline[4];
     private readonly TextMeshProUGUI street, potAndAnte, turn, notice, target, feedback, betHeading, betHand, accusationHand;
     private readonly UnityEngine.UI.Image turnMark;
     private readonly UnityEngine.UI.Image[] suspectPlates;
     private readonly TextMeshProUGUI[] suspectNames;
     private readonly SettlementCard settlementCard;
+    private readonly RectTransform showdownCaption;
+    private readonly TextMeshProUGUI showdownTitle, showdownDetail;
+    private Play2TablePreview.ShowdownBeat lastBeat;
+    private int lastHighlightSeat;
     private readonly Play2InGameSettings settings;
-    private readonly TextMeshProUGUI[] seatLabels = new TextMeshProUGUI[4];
+    private readonly TextMeshProUGUI[] seatLabels = new TextMeshProUGUI[4], seatStacks = new TextMeshProUGUI[4];
     private readonly UnityEngine.UI.Image[] actionRows = new UnityEngine.UI.Image[4];
     private readonly CanvasGroup[] actionOpacity = new CanvasGroup[4];
     private readonly TextMeshProUGUI[] actionLabels = new TextMeshProUGUI[4];
     private readonly Play2HandGuide handGuide;
-    private bool acting;
+    private bool acting, canReserve;
+    private enum Reservation { None, CheckOrFold, CheckOrCall }
+    private Reservation reservation;
+    private long quotedCall, reservedCall;
+    private readonly CanvasGroup baseActions;
+    private readonly RectTransform freeFold;
+    private TextMeshProUGUI betCommit;
+    private readonly int[] potPercents = { 33, 50, 100, 200 };
+    private readonly UnityEngine.UI.Button[] potButtons = new UnityEngine.UI.Button[4];
     private UnityEngine.UI.Slider amountSlider;
-    internal bool CanOpenChat => packet != null && !settings.IsOpen;
+    internal bool CanOpenChat => packet != null && !settings.IsOpen && !handGuide.IsOpen;
     private long WholeStack
     {
         get { var self = packet.game.seats.First(s => s.seat == packet.viewerSeat); return self.stack + self.streetContribution; }
@@ -34,8 +50,12 @@ internal sealed partial class Play2TableHud
     private long minimumBet, maximumBet, betAmount;
     private HoldemRoomPacket packet;
     private string lastStatus, noticeKey;
+    private Coroutine feedbackRoutine;
     private readonly HashSet<string> shownNotices = new HashSet<string>();
-    private bool wasDealing;
+    private bool wasDealing, wasSettlementReady, wasActionPending;
+    private const float VerdictReadTime = 2.6f;
+    private float settlementRevealUntil, noticeUntil;
+    private bool announceSettlement;
     private int[] suspects = Array.Empty<int>();
     private int suspectIndex;
 
@@ -44,107 +64,108 @@ internal sealed partial class Play2TableHud
         this.table = table;
         this.owner = owner;
         root = Play2UGui.Fill("Game HUD", parent);
-        var top = Play2UGui.Rect("Header", root, Vector2.zero, Vector2.zero);
-        top.anchorMin = new Vector2(0f, 1f);
-        top.anchorMax = Vector2.one;
-        top.offsetMin = new Vector2(15, -54);
-        top.offsetMax = new Vector2(-11, -17);
+        var leave = Play2HudArt.Button("Leave", root, "나가기", new Vector2(60, -32), new Vector2(92, 34),
+            "PlayingBadge", Play2UGui.Cream, font, table.Leave, 16);
+        leave.GetComponent<RectTransform>().anchorMin = leave.GetComponent<RectTransform>().anchorMax = Vector2.up;
+        var options = Play2HudArt.Button("Settings", root, "설정", new Vector2(-49, -32), new Vector2(70, 34),
+            "PlayingBadge", Play2UGui.Cream, font, OpenSettings, 16);
+        options.GetComponent<RectTransform>().anchorMin = options.GetComponent<RectTransform>().anchorMax = Vector2.one;
 
-        var leave = Play2HudArt.Button("Leave", top, "나가기", new Vector2(53, 0), new Vector2(106, 37),
-            "PlayingBadge", Play2UGui.Cream, font, table.Leave, 18);
-        var leaveRect = (RectTransform)leave.transform;
-        leaveRect.anchorMin = leaveRect.anchorMax = new Vector2(0, .5f);
-        leave.GetComponentInChildren<TextMeshProUGUI>().rectTransform.anchoredPosition = new Vector2(9, 0);
-        Play2HudArt.Plate("Back", leaveRect, new Vector2(-30, 0), new Vector2(11, 15), "PlayingBack");
+        potPanel = Play2UGui.Panel("Table Pot", root, Vector2.zero, new Vector2(190, 62), Color.clear);
+        potAndAnte = Play2UGui.Text("Pot Amount", potPanel, "", new Vector2(0, 10), new Vector2(180, 34), 25,
+            Play2UGui.Gold, font, style: FontStyles.Bold);
+        Play2HudArt.Fit(potAndAnte, 19);
+        var potShadow = potAndAnte.gameObject.AddComponent<UnityEngine.UI.Shadow>();
+        potShadow.effectColor = new Color(0, 0, 0, .7f);
+        potShadow.effectDistance = new Vector2(0, -2);
+        street = Play2UGui.Text("Table Entry Fee", potPanel, "", new Vector2(0, -17), new Vector2(180, 20), 13,
+            Play2UGui.Cream, font);
 
-        var stage = Play2HudArt.Plate("Stage Plate", top, new Vector2(-14, -4), new Vector2(270, 38), "PlayingStage");
-        Play2HudArt.Plate("Stage Diamond", stage, new Vector2(-86, 0), new Vector2(14, 17), "PlayingDiamond");
-        street = Play2UGui.Text("Street", stage, "", new Vector2(18, 0), new Vector2(190, 34), 18,
-            Play2UGui.Ink, font, style: FontStyles.Bold);
-        street.textWrappingMode = TextWrappingModes.NoWrap;
-        street.characterSpacing = -2;
-        Play2HudArt.Fit(street, 13);
-
-        var score = Play2HudArt.Plate("Pot and Ante", top, new Vector2(-88, 0), new Vector2(176, 37), "PlayingBadge");
-        score.anchorMin = score.anchorMax = new Vector2(1, .5f);
-        potAndAnte = Play2UGui.Text("Amounts", score, "", Vector2.zero, new Vector2(162, 31), 17,
-            Play2UGui.Cream, font, style: FontStyles.Bold);
-        potAndAnte.textWrappingMode = TextWrappingModes.NoWrap;
-        Play2HudArt.Fit(potAndAnte, 11);
-
-        var seats = Play2UGui.Rect("Seat Status", root, Vector2.zero, Vector2.zero);
-        seats.anchorMin = new Vector2(.269f, 1f);
-        seats.anchorMax = new Vector2(.724f, 1f);
-        seats.offsetMin = new Vector2(0, -104);
-        seats.offsetMax = new Vector2(0, -72);
         for (int i = 0; i < seatLabels.Length; i++)
         {
-            var plate = Play2HudArt.Plate("Player " + (i + 1), seats, Vector2.zero, Vector2.zero, "PlayingBadge");
-            plate.anchorMin = new Vector2(i / 4f, 0);
-            plate.anchorMax = new Vector2((i + 1) / 4f, 1);
-            plate.offsetMin = new Vector2(8, 0);
-            plate.offsetMax = new Vector2(-8, 0);
-
-            var label = Play2UGui.Text("Info", plate, "", Vector2.zero, Vector2.zero, 16,
+            var plate = Play2HudArt.Plate("Player " + (i + 1), root, Vector2.zero, new Vector2(152, 56), "PlayingBadge");
+            seatPanels[i] = plate;
+            var outline = plate.gameObject.AddComponent<UnityEngine.UI.Outline>();
+            outline.effectColor = Play2UGui.Gold;
+            outline.effectDistance = new Vector2(2, -2);
+            outline.enabled = false;
+            seatOutlines[i] = outline;
+            var line = Play2UGui.Panel("Turn Marker", plate, new Vector2(-69, 0), new Vector2(3, 38), Play2UGui.Gold);
+            seatTurns[i] = line.GetComponent<UnityEngine.UI.Image>();
+            var label = Play2UGui.Text("Info", plate, "", new Vector2(0, 13), new Vector2(136, 20), 15,
                 Play2UGui.Cream, font, style: FontStyles.Bold);
-            Play2HudArt.Fit(label, 10);
-            label.rectTransform.anchorMin = Vector2.zero;
-            label.rectTransform.anchorMax = Vector2.one;
-            label.rectTransform.offsetMin = new Vector2(7, 2);
-            label.rectTransform.offsetMax = new Vector2(-7, -2);
-            label.overflowMode = TextOverflowModes.Ellipsis;
-            label.textWrappingMode = TextWrappingModes.NoWrap;
             label.richText = false;
+            label.textWrappingMode = TextWrappingModes.NoWrap;
+            label.overflowMode = TextOverflowModes.Ellipsis;
+            Play2HudArt.Fit(label, 12);
             seatLabels[i] = label;
+            var stack = Play2UGui.Text("Chips", plate, "", new Vector2(0, -6), new Vector2(144, 24), 20,
+                Play2UGui.Cream, font, style: FontStyles.Bold);
+            stack.textWrappingMode = TextWrappingModes.NoWrap;
+            Play2HudArt.Fit(stack, 14);
+            seatStacks[i] = stack;
+            seatStates[i] = Play2UGui.Text("Seat State", plate, "", new Vector2(0, -19), new Vector2(136, 17), 14,
+                Play2UGui.Gold, font);
+            seatStates[i].richText = false;
         }
-        var noticePanel = Play2HudArt.Plate("Action Notice", root, new Vector2(0, -130), new Vector2(334, 53), "CreamPanel");
+
+        var noticePanel = Play2HudArt.Plate("Action Notice", root, new Vector2(0, -32), new Vector2(600, 50), "CreamPanel");
         noticePanel.anchorMin = noticePanel.anchorMax = new Vector2(.5f, 1);
-        noticePanel.anchoredPosition = new Vector2(0, -130);
-        Play2HudArt.Plate("Diamond", noticePanel, new Vector2(-140, 0), new Vector2(14, 17), "Diamond");
-        notice = Play2UGui.Text("Text", noticePanel, "", new Vector2(10, 0), new Vector2(269, 42), 22, PaperInk, font,
+        notice = Play2UGui.Text("Text", noticePanel, "", Vector2.zero, new Vector2(574, 44), 18, PaperInk, font,
             style: FontStyles.Bold);
         notice.richText = false;
-        Play2HudArt.Fit(notice, 11);
-        notice.overflowMode = TextOverflowModes.Ellipsis;
+        Play2HudArt.Fit(notice, 12);
         noticePanel.gameObject.SetActive(false);
-        var sidebar = Play2HudArt.Plate("Actions and Hand", root, Vector2.zero, Vector2.zero, "PlayingPanel");
-        controls = Play2UGui.Rect("Action Keys", sidebar, Vector2.zero, Vector2.zero);
-        controls.anchorMin = new Vector2(0, 1);
-        controls.anchorMax = Vector2.one;
-        controls.offsetMin = new Vector2(0, -Play2UGui.ActionAreaHeight);
-        controls.offsetMax = Vector2.zero;
-        turnMark = Play2HudArt.Plate("Turn Diamond", controls, new Vector2(-106, 55), new Vector2(16, 19), "PlayingDiamond")
+
+        controls = Play2UGui.Panel("Action Keys", root, new Vector2(-200, 73), new Vector2(370, 118), Color.clear);
+        controls.anchorMin = controls.anchorMax = new Vector2(1, 0);
+        baseActions = controls.gameObject.AddComponent<CanvasGroup>();
+        turnMark = Play2UGui.Panel("Turn Marker", controls, new Vector2(-170, 36), new Vector2(4, 24), Color.clear)
             .GetComponent<UnityEngine.UI.Image>();
-        turn = Play2UGui.Text("Turn", controls, "", new Vector2(28, 55), new Vector2(231, 33), 24,
+        turn = Play2UGui.Text("Turn", controls, "", new Vector2(-39, 36), new Vector2(232, 25), 18,
             Play2UGui.Cream, font, TextAlignmentOptions.MidlineLeft, FontStyles.Bold);
         turn.textWrappingMode = TextWrappingModes.NoWrap;
-        Play2HudArt.Fit(turn, 13);
-        Play2UGui.Panel("Action Divider", controls, new Vector2(0, -80.5f), new Vector2(235, 1.25f), Play2UGui.Hex("D6C094"));
-
+        Play2HudArt.Fit(turn, 12);
         string[] keys = { "F", "E", "R", "X" };
         for (int i = 0; i < keys.Length; i++)
         {
-            float x = i % 2 == 0 ? -60.5f : 60.5f;
-            float y = i < 2 ? 6 : -45;
-            var row = Play2HudArt.Plate(keys[i] + " Action", controls, new Vector2(x, y), new Vector2(115, 44), "PlayingAction");
+            var position = i == 3 ? new Vector2(127, 36) : new Vector2(-119 + 119 * i, -15);
+            var size = i == 3 ? new Vector2(82, 29) : new Vector2(111, 51);
+            var row = Play2HudArt.Plate(keys[i] + " Action", controls, position, size, i == 2 ? "GoldButton" : "PlayingAction");
             int action = i;
-            Play2HudArt.Clickable(row, () => PerformAction(action));
+            var actionButton = Play2HudArt.Clickable(row, () => PerformAction(action));
+            var colors = actionButton.colors;
+            colors.disabledColor = Color.white;
+            actionButton.colors = colors;
             actionRows[i] = row.GetComponent<UnityEngine.UI.Image>();
             actionOpacity[i] = row.gameObject.AddComponent<CanvasGroup>();
-            actionLabels[i] = Play2UGui.Text("Action", row, "", new Vector2(-14, 0), new Vector2(66, 29), 18,
-                Play2UGui.Cream, font, style: FontStyles.Bold);
+            actionLabels[i] = Play2UGui.Text("Action", row, "", Vector2.zero, size - new Vector2(10, 4), i == 3 ? 15 : 19,
+                i == 2 ? PaperInk : Play2UGui.Cream, font, style: FontStyles.Bold);
             actionLabels[i].textWrappingMode = TextWrappingModes.NoWrap;
-            Play2HudArt.Fit(actionLabels[i], 13);
-            Play2HudArt.Plate(keys[i] + " Keycap", row, new Vector2(31, 0), new Vector2(23, 21), "PlayingKey" + keys[i]);
+            Play2HudArt.Fit(actionLabels[i], 14);
         }
-
-        feedback = Play2UGui.Text("Feedback", root, "", new Vector2(0, 14), new Vector2(390, 32), 14,
+        var feedbackPanel = Play2HudArt.Plate("Status Toast", root, new Vector2(0, -32), new Vector2(480, 42), "PlayingBadge");
+        feedbackPanel.anchorMin = feedbackPanel.anchorMax = new Vector2(.5f, 1);
+        feedback = Play2UGui.Text("Feedback", feedbackPanel, "", Vector2.zero, new Vector2(456, 34), 16,
             Play2UGui.Cream, font);
-        Play2UGui.Anchor(feedback.rectTransform, new Vector2(.5f, 0));
-        handGuide = new Play2HandGuide(sidebar, font);
+        feedback.richText = false;
+        Play2HudArt.Fit(feedback, 13);
+        feedbackPanel.gameObject.SetActive(false);
+        handGuide = new Play2HandGuide(root, font);
         (sizing, betHand, target, betHeading, betAdjustments, allInOption) = BuildBetPicker(root, font);
+        freeFold = BuildFreeFold(root, font);
         (accusation, accusationHand, suspectPlates, suspectNames) = BuildAccusationPicker(root, font);
-        settlementCard = new SettlementCard(root, font, AdvanceHand);
+        showdownCaption = Play2HudArt.Plate("Showdown Caption", root, new Vector2(-190, 65), new Vector2(344, 82), "PlayingBadge");
+        showdownCaption.anchorMin = showdownCaption.anchorMax = Vector2.right;
+        showdownTitle = Play2UGui.Text("Showdown Title", showdownCaption, "", new Vector2(0, 13), new Vector2(317, 44),
+            37, Play2UGui.Gold, font, style: FontStyles.Bold);
+        showdownDetail = Play2UGui.Text("Showdown Detail", showdownCaption, "", new Vector2(0, -19), new Vector2(317, 25),
+            18, Play2UGui.Cream, font);
+        showdownTitle.richText = showdownDetail.richText = false;
+        Play2HudArt.Fit(showdownTitle, 16);
+        Play2HudArt.Fit(showdownDetail, 13);
+        showdownCaption.gameObject.SetActive(false);
+        settlementCard = new SettlementCard(root, font, AdvanceHand, table.ToggleRematchReady);
         settings = new Play2InGameSettings(root, font);
         root.gameObject.SetActive(false);
     }
@@ -154,7 +175,8 @@ internal sealed partial class Play2TableHud
         if (value?.hasGame != true)
         {
             packet = null;
-            acting = false;
+            acting = canReserve = false;
+            reservation = Reservation.None;
             noticeKey = null;
             notice.transform.parent.gameObject.SetActive(false);
             shownNotices.Clear();
@@ -164,51 +186,147 @@ internal sealed partial class Play2TableHud
             root.gameObject.SetActive(false);
             return;
         }
+        UpdatePositions(value);
         bool dealing = table.IsDealing;
-        if (ReferenceEquals(packet, value) && lastStatus == status && wasDealing == dealing) return;
+        var beat = table.Showdown;
+        bool showingHands = beat == Play2TablePreview.ShowdownBeat.Reveal;
+        bool showingAwards = beat == Play2TablePreview.ShowdownBeat.Award;
+        bool beforeAward = showingHands || beat == Play2TablePreview.ShowdownBeat.Waiting;
+        bool actionPending = table.ActionPending;
+        var verdict = value.hasTurnAccusation ? value.turnAccusation : null;
+        string verdictKey = verdict != null && verdict.handId == value.game.handId
+            ? $"a:{verdict.handId}:{verdict.street}:{verdict.accuser}:{verdict.target}" : null;
+        if (value.game.hasResult && (packet?.game.hasResult != true || packet.game.handId != value.game.handId))
+        {
+            announceSettlement = packet?.hasGame == true && packet.game.handId == value.game.handId;
+            settlementRevealUntil = Time.unscaledTime;
+            if (announceSettlement)
+            {
+                settlementRevealUntil += 1.1f;
+                if (verdictKey != null)
+                {
+                    if (!shownNotices.Contains(verdictKey)) settlementRevealUntil = Time.unscaledTime + VerdictReadTime;
+                    else if (noticeKey == verdictKey) settlementRevealUntil = Mathf.Max(settlementRevealUntil, noticeUntil);
+                }
+            }
+        }
+        bool settlementReady = !value.game.hasResult
+            || Time.unscaledTime >= settlementRevealUntil && !dealing && !table.IsBetting && !beforeAward && !showingAwards;
+        bool resultBecameVisible = value.game.hasResult && settlementReady
+            && (!wasSettlementReady || packet?.game.hasResult != true);
+        if (ReferenceEquals(packet, value) && lastStatus == status && wasDealing == dealing
+            && wasSettlementReady == settlementReady && wasActionPending == actionPending && lastBeat == beat
+            && lastHighlightSeat == table.HighlightSeat) return;
+        bool awaitingWinner = beforeAward || (value.game.hasResult && !settlementReady && beat == Play2TablePreview.ShowdownBeat.None);
         var previousPacket = packet;
         var previous = previousPacket?.game;
+        if (lastStatus != status)
+        {
+            if (feedbackRoutine != null) owner.StopCoroutine(feedbackRoutine);
+            if (!string.IsNullOrEmpty(status)) notice.transform.parent.gameObject.SetActive(false);
+            feedback.text = status ?? "";
+            feedback.transform.parent.gameObject.SetActive(!string.IsNullOrEmpty(status));
+            feedbackRoutine = owner.StartCoroutine(HideFeedback());
+        }
+        bool firstAward = showingAwards && lastBeat != Play2TablePreview.ShowdownBeat.Award;
         packet = value; lastStatus = status;
+        lastBeat = beat;
+        lastHighlightSeat = table.HighlightSeat;
         wasDealing = dealing;
+        wasSettlementReady = settlementReady;
         root.gameObject.SetActive(true);
         var game = packet.game;
+        showdownCaption.gameObject.SetActive(showingHands || showingAwards);
+        if (showingHands)
+        {
+            showdownTitle.text = "쇼다운";
+            showdownDetail.text = "핸드 공개";
+        }
+        else if (showingAwards)
+        {
+            var paid = game.seats.FirstOrDefault(seat => seat.seat == table.HighlightSeat);
+            showdownTitle.text = paid == null ? "쇼다운" : Play2HandGuide.CategoryLabel(Play2SettlementSummary.Value(paid));
+            string outcome = table.AwardCount <= 1 ? "승리" : game.result.pots?.Length == 1 ? "공동 승리" : "팟 획득";
+            var group = table.HighlightSeats;
+            if (group.Length > 1)
+            {
+                string winners = group.Length == game.seats.Count(seat => seat.dealtIn) ? $"{group.Length}명"
+                    : string.Join(", ", group.Select(DisplayName));
+                bool equalShares = game.seats.Where(seat => Array.IndexOf(group, seat.seat) >= 0).All(seat => seat.awarded == paid.awarded);
+                showdownDetail.text = winners + " " + outcome + (equalShares ? $"    각 +{paid.awarded}칩" : "");
+            }
+            else showdownDetail.text = paid == null ? "" : $"{Name(paid.seat)} {outcome}    +{paid.awarded}칩";
+        }
         if (previous?.handId != game.handId)
         {
             shownNotices.Clear();
             noticeKey = null;
             notice.transform.parent.gameObject.SetActive(false);
         }
-        street.text = game.hasResult ? "결과" : game.board.Length == 0 ? "카드 공개 전" : $"공용 카드 {game.board.Length}/5장 공개";
-        potAndAnte.text = $"팟 {game.pot}칩   입장료 {game.postedAnte}칩";
+        street.gameObject.SetActive(game.board.Length == 0 && !game.hasResult);
+        street.text = $"입장료 {game.postedAnte}칩";
+        potAndAnte.text = $"팟  {game.pot}칩";
         for (int i = 0; i < seatLabels.Length; i++)
         {
             var seat = game.seats.FirstOrDefault(s => s.seat == i + 1);
-            if (seat == null) { seatLabels[i].text = "빈자리"; seatLabels[i].color = Play2UGui.Cream; continue; }
-            string label = seat.status == (int)HoldemSeatStatus.Folded ? " · 폴드"
-                : seat.status == (int)HoldemSeatStatus.AllIn ? " · 올인" : seat.status == (int)HoldemSeatStatus.Busted ? " · 탈락" : "";
-            string name = Name(seat.seat) + (seat.viewer ? " (나)" : "");
-            seatLabels[i].text = $"{name}   {seat.stack}칩{label}";
-            if (game.hasResult && seat.revealedBestCards?.Length == 5)
+            seatPanels[i].gameObject.SetActive(seat != null);
+            if (seat == null) continue;
+            long shownStack = awaitingWinner ? Math.Max(0L, seat.stack - seat.awarded) : seat.stack;
+            seatLabels[i].text = seat.viewer ? "" : Name(seat.seat);
+            seatStacks[i].text = seat.viewer ? $"내 칩  {shownStack}" : $"{shownStack}칩";
+            seatStates[i].text = seat.status == (int)HoldemSeatStatus.Folded ? "폴드"
+                : seat.status == (int)HoldemSeatStatus.AllIn ? "올인"
+                : beforeAward && seat.status == (int)HoldemSeatStatus.Busted && Play2SettlementSummary.IsPublicHand(seat) ? "올인"
+                : seat.status == (int)HoldemSeatStatus.Busted ? "탈락"
+                : seat.streetContribution > 0 ? $"베팅 {seat.streetContribution}칩" : "";
+            if (game.hasResult && beat != Play2TablePreview.ShowdownBeat.Waiting && !seat.viewer && seat.revealedBestCards?.Length == 5)
             {
                 var valueOfHand = HandEvaluator.Evaluate(seat.revealedBestCards.Select(Poker.Foundation.Card.FromId).ToArray());
-                seatLabels[i].text = $"{name}  {seat.stack}칩\n{Play2HandGuide.CategoryLabel(valueOfHand)}";
+                seatStates[i].text = Play2HandGuide.CategoryLabel(valueOfHand);
             }
-            seatLabels[i].color = seat.currentActor ? Play2UGui.Gold : Play2UGui.Cream;
+            bool won = game.hasResult && !awaitingWinner && seat.awarded > 0;
+            if (won) seatStates[i].text = (string.IsNullOrEmpty(seatStates[i].text) ? "승리" : seatStates[i].text)
+                + "  +" + seat.awarded + "칩";
+            if (seat.viewer && !won && (seat.status == (int)HoldemSeatStatus.Folded || seat.status == (int)HoldemSeatStatus.Busted))
+                seatStates[i].text = "";
+            bool hasTurn = seat.currentActor && !game.hasResult && !packet.paused
+                && !game.dealPending && !game.revealPending && !dealing;
+            seatTurns[i].enabled = (hasTurn || won) && !seat.viewer;
+            seatOutlines[i].enabled = false;
+            bool withStatus = hasTurn || won || !string.IsNullOrEmpty(seatStates[i].text);
+            seatLabels[i].rectTransform.anchoredPosition = new Vector2(0, withStatus ? 16 : 12);
+            seatStacks[i].rectTransform.anchoredPosition = new Vector2(0, seat.viewer ? 5 : withStatus ? -1 : -8);
+            seatPanels[i].GetComponent<UnityEngine.UI.Image>().color = seat.viewer
+                ? Color.clear : Play2UGui.Hex(won ? "473F2BEA" : hasTurn ? "14292FEF" : "10191C9E");
+            seatLabels[i].color = hasTurn || won ? Play2UGui.Gold : Play2UGui.Cream;
+            if (hasTurn && !seat.viewer) seatStates[i].text = "차례" + (seat.streetContribution > 0 ? $"  |  베팅 {seat.streetContribution}칩" : "");
         }
+        bool wasActing = acting;
         acting = game.hasLegal && game.currentSeat == packet.viewerSeat && !packet.paused
-            && !game.hasResult && !game.dealPending && !game.revealPending && !dealing;
+            && !game.hasResult && !game.dealPending && !game.revealPending && !dealing && !actionPending;
+        if (acting && !wasActing && !wasActionPending) table.PlayTurnSound();
+        wasActionPending = actionPending;
+        if ((firstAward || resultBecameVisible) && announceSettlement)
+        {
+            table.PlayResultSound();
+            announceSettlement = false;
+        }
         var legal = game.legal;
         bool settlement = game.settlementState == (int)HoldemSettlementState.AwaitingOddChipPriority;
-        bool showActions = !game.hasResult && !settlement;
-        controls.gameObject.SetActive(showActions);
-        handGuide.SetActionsVisible(showActions);
-        SetAction(0, "폴드", showActions, acting && legal.fold);
-        SetAction(1, legal?.call == true ? $"콜 {legal.callAmount}" : "체크", showActions, acting && (legal.check || legal.call));
-        SetAction(2, legal?.bet == true ? "베팅" : legal?.raise != true && legal?.hasAllInTarget == true ? "올인" : "레이즈",
-            showActions, acting && (legal.bet || legal.raise || legal.hasAllInTarget));
-        SetAction(3, "고발", showActions, acting && game.canAccuseOnTurn);
-        if (!acting || previous?.handId != game.handId || previous?.street != game.street || previous?.currentSeat != game.currentSeat)
+        bool bettingRound = !game.hasResult && !settlement;
+        controls.gameObject.SetActive(bettingRound);
+        var playingSeat = game.seats.FirstOrDefault(seat => seat.seat == packet.viewerSeat);
+        bool showActions = bettingRound && playingSeat?.dealtIn == true && playingSeat.status == (int)HoldemSeatStatus.Active;
+        bool sameWindow = previous?.handId == game.handId && previous.street == game.street
+            && previousPacket.viewerSeat == packet.viewerSeat && previousPacket.sessionId == packet.sessionId;
+        canReserve = showActions && !packet.paused && !game.dealPending && !game.revealPending && !dealing
+            && !actionPending && game.currentSeat > 0 && game.currentSeat != packet.viewerSeat;
+        quotedCall = showActions ? acting ? legal.callAmount : VisibleCall(game, playingSeat) : 0;
+        if (!sameWindow || !(canReserve || acting) || reservation == Reservation.CheckOrCall && quotedCall > reservedCall)
+            reservation = Reservation.None;
+        if (!acting || !sameWindow || previous.currentSeat != game.currentSeat)
             CloseActionPanels();
+        DrawActions(showActions);
         if (acting && game.canAccuseOnTurn && (previous?.version != game.version || suspects.Length == 0))
         {
             suspects = game.seats.Where(s => s.dealtIn && s.seat != packet.viewerSeat && s.status != (int)HoldemSeatStatus.Folded).Select(s => s.seat).ToArray();
@@ -216,19 +334,38 @@ internal sealed partial class Play2TableHud
             UpdateSuspect();
         }
         handGuide.Present(packet, dealing);
-        betHand.text = accusationHand.text = $"내 족보 · {handGuide.CurrentRank}";
-        settlementCard.Present(packet, settlement, table.IsHost, DisplayName);
-        feedback.text = status ?? "";
+        accusationHand.text = handGuide.CurrentRank;
+        if (settlementReady) settlementCard.Present(packet, settlement, table.IsHost, actionPending, DisplayName);
+        else settlementCard.Hide();
         turn.text = packet.paused ? "연결 대기 중" : settlement ? "정산 대기" : game.hasResult ? (game.isOver ? "경기 종료" : "이번 판 종료")
-            : game.dealPending ? "딜러가 다음 카드를 준비 중입니다." : game.revealPending || dealing ? "카드 공개 중"
+            : game.dealPending ? "딜러가 요청을 읽고 있어요" : game.revealPending || dealing ? "카드 공개 중"
+            : actionPending ? "처리 중"
             : acting ? "내 차례" : $"{Name(game.currentSeat)} 차례";
-        turn.color = Play2UGui.Cream;
-        turnMark.color = acting ? Color.white : new Color(1, 1, 1, .52f);
-        if (packet.hasTurnAccusation)
+        turn.color = acting ? Play2UGui.Gold : Play2UGui.Cream;
+        turnMark.color = acting ? Play2UGui.Hex("E9CC8C") : Color.clear;
+        if (acting && reservation != Reservation.None)
         {
-            var result = packet.turnAccusation;
-            ShowNotice($"a:{result.handId}:{result.street}:{result.accuser}:{result.target}",
-                $"{Name(result.accuser)} → {Name(result.target)}  ·  {(result.caught ? "고발 적중" : "고발 실패")}");
+            var intent = reservation;
+            reservation = Reservation.None;
+            if (legal.check) Act(BettingActionKind.Check);
+            else if (intent == Reservation.CheckOrCall && legal.call && legal.callAmount <= reservedCall) Act(BettingActionKind.Call);
+            else if (intent == Reservation.CheckOrFold && legal.fold) Act(BettingActionKind.Fold);
+        }
+        // A restored hand already has its public verdict in the recap.
+        if (verdictKey != null && previous?.handId != game.handId) shownNotices.Add(verdictKey);
+        if (verdictKey != null)
+        {
+            var result = verdict;
+            string outcome = $"{Name(result.accuser)} → {Name(result.target)}   "
+                + (result.caught ? $"고발 적중\n{Name(result.target)} 폴드" : $"고발 실패\n{Name(result.accuser)} 폴드");
+            if (!result.caught && packet.hasHistory)
+            {
+                var fine = packet.history?.entries?.LastOrDefault(entry =>
+                    entry.kind == (int)HoldemHistoryKind.AccusationFine && entry.seat == result.accuser
+                    && entry.street == result.street);
+                if (fine != null && fine.amount > 0) outcome += $", 벌금 {fine.amount}칩";
+            }
+            ShowNotice(verdictKey, outcome);
         }
         if (!game.hasResult && packet.dealerSelections != null)
         {
@@ -246,15 +383,11 @@ internal sealed partial class Play2TableHud
                     ShowNotice($"dealer:{game.handId}:{selection.dealWindowId}", message);
                 }
             }
-            else if (previous != null && previous.handId == game.handId
-                && previous.board.Length != game.board.Length && game.board.Length > 0)
-                ShowNotice($"street:{game.handId}:{game.board.Length}", $"공용 카드 {game.board.Length}장 공개");
-        }
-        else if (!game.hasResult && previous != null && previous.handId == game.handId
-            && previous.board.Length != game.board.Length && game.board.Length > 0)
-            ShowNotice($"street:{game.handId}:{game.board.Length}", $"공용 카드 {game.board.Length}장 공개");
 
-        if (!game.hasResult && !settlement) ShowAcceptedBet(previousPacket, value);
+        }
+
+
+
     }
 
     private void OpenSettings()
@@ -263,23 +396,37 @@ internal sealed partial class Play2TableHud
         settings.Open();
     }
 
-    private void ShowAcceptedBet(HoldemRoomPacket previous, HoldemRoomPacket current)
+    private void UpdatePositions(HoldemRoomPacket value)
     {
-        if (previous?.game.handId != current.game.handId || current.history?.entries == null) return;
-
-        long previousCount = previous.history?.entries == null ? 0 : previous.history.omittedCount + previous.history.entries.Length;
-        var history = current.history;
-        for (int i = history.entries.Length - 1; i >= 0 && history.omittedCount + i >= previousCount; i--)
+        PositionAtViewport(potPanel, table.PotLabelViewport, 105, 160);
+        var noticePanel = (RectTransform)notice.transform.parent;
+        float noticeBottom = -noticePanel.anchoredPosition.y + noticePanel.rect.height / 2;
+        for (int i = 0; i < seatPanels.Length; i++)
         {
-            var entry = history.entries[i];
-            if (!entry.hasAction || entry.seat != current.viewerSeat || entry.amount <= 0) continue;
-            string action = entry.action == (int)BettingActionKind.BetTo ? "베팅"
-                : entry.action == (int)BettingActionKind.RaiseTo ? "레이즈" : null;
-            if (action == null) continue;
-            if (entry.allIn) action = "올인";
-            ShowNotice($"bet:{current.game.handId}:{history.omittedCount + i}", $"나 · {entry.amount}칩 {action}");
-            break;
+            if (i + 1 == value.viewerSeat)
+                seatPanels[i].anchoredPosition = new Vector2(90, -root.rect.height / 2 + 35);
+            else
+            {
+                var point = table.PlayerLabelViewport(i + 1);
+                point.y += (seatPanels[i].rect.height / 2 + 8) / root.rect.height;
+                float width = root.rect.width;
+                bool nearMenu = point.x * width < 196 || (1 - point.x) * width < 244;
+                float topMargin = nearMenu ? 89 : 39;
+                // Reserve the notice lane even while it is empty so a verdict never moves the nameplate.
+                float plateX = Mathf.Clamp((point.x - .5f) * width, root.rect.xMin + 101, root.rect.xMax - 101);
+                if (Mathf.Abs(plateX) < (noticePanel.rect.width + seatPanels[i].rect.width) / 2 + 6)
+                    topMargin = Mathf.Max(topMargin, noticeBottom + seatPanels[i].rect.height / 2 + 6);
+                PositionAtViewport(seatPanels[i], point, 101, 350, topMargin);
+            }
         }
+    }
+
+    private void PositionAtViewport(RectTransform rect, Vector3 point, float sideMargin, float bottomMargin, float topMargin = 95)
+    {
+        var area = root.rect;
+        var local = new Vector2((point.x - .5f) * area.width, (point.y - .5f) * area.height);
+        rect.anchoredPosition = new Vector2(Mathf.Clamp(local.x, area.xMin + sideMargin, area.xMax - sideMargin),
+            Mathf.Clamp(local.y, area.yMin + bottomMargin, area.yMax - topMargin));
     }
 
     public void HandleKeys(bool chatFocused)
@@ -292,7 +439,19 @@ internal sealed partial class Play2TableHud
             return;
         }
         if (chatFocused) return;
+        if (handGuide.IsOpen)
+        {
+            if (keyboard.escapeKey.wasPressedThisFrame || keyboard.hKey.wasPressedThisFrame) handGuide.Close();
+            return;
+        }
 
+        if (freeFold.gameObject.activeSelf)
+        {
+            if (keyboard.escapeKey.wasPressedThisFrame) CloseActionPanels();
+            else if (keyboard.eKey.wasPressedThisFrame) Act(BettingActionKind.Check);
+            else if (keyboard.fKey.wasPressedThisFrame) Act(BettingActionKind.Fold);
+            return;
+        }
         bool selecting = sizing.gameObject.activeSelf || accusation.gameObject.activeSelf;
         if (!selecting && keyboard.escapeKey.wasPressedThisFrame)
         {
@@ -300,6 +459,12 @@ internal sealed partial class Play2TableHud
             return;
         }
         if (keyboard.hKey.wasPressedThisFrame && !selecting) handGuide.Toggle();
+        if (canReserve)
+        {
+            if (keyboard.fKey.wasPressedThisFrame) PerformAction(0);
+            else if (keyboard.eKey.wasPressedThisFrame) PerformAction(1);
+            return;
+        }
         if (!acting) return;
 
         if (sizing.gameObject.activeSelf)
@@ -321,8 +486,24 @@ internal sealed partial class Play2TableHud
 
     private void PerformAction(int index)
     {
-        if (!acting || settings.IsOpen || !actionOpacity[index].interactable) return;
-        if (index == 0) Act(BettingActionKind.Fold);
+        if (table.ActionPending || settings.IsOpen || handGuide.IsOpen || !actionOpacity[index].interactable
+            || !baseActions.interactable) return;
+        if (canReserve && index < 2)
+        {
+            var choice = index == 0 ? Reservation.CheckOrFold : Reservation.CheckOrCall;
+            reservation = reservation == choice ? Reservation.None : choice;
+            reservedCall = quotedCall;
+            DrawActions(true);
+            return;
+        }
+        if (!acting) return;
+        if (index == 0 && packet.game.legal.check)
+        {
+            ClearSelection();
+            freeFold.gameObject.SetActive(true);
+            SetPickerOpen(true);
+        }
+        else if (index == 0) Act(BettingActionKind.Fold);
         else if (index == 1) Act(packet.game.legal.check ? BettingActionKind.Check : BettingActionKind.Call);
         else if (index == 2)
         {
@@ -334,15 +515,50 @@ internal sealed partial class Play2TableHud
             CloseActionPanels();
             ClearSelection();
             accusation.gameObject.SetActive(true);
-            handGuide.SetActionPickerOpen(true);
+            SetPickerOpen(true);
         }
+    }
+
+    private static long VisibleCall(HoldemGamePacket game, HoldemSeatPacket self)
+    {
+        bool activeOpponent = game.seats.Any(s => s.seat != self.seat && s.dealtIn && s.status == (int)HoldemSeatStatus.Active && s.stack > 0);
+        long highest = game.seats.Where(s => s.dealtIn && (activeOpponent || s.status != (int)HoldemSeatStatus.Folded))
+            .Max(s => s.streetContribution);
+        return Math.Min(self.stack, Math.Max(0, highest - self.streetContribution));
+    }
+
+    private void DrawActions(bool show)
+    {
+        var legal = packet.game.legal;
+        string call = quotedCall > 0 ? $"콜 {quotedCall}칩" : "체크";
+        SetAction(0, canReserve ? "체크 / 폴드" : "폴드", show, canReserve || acting && legal.fold);
+        SetAction(1, call, show, canReserve || acting && (legal.check || legal.call));
+        if (canReserve)
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                bool selected = i == 0 ? reservation == Reservation.CheckOrFold : reservation == Reservation.CheckOrCall;
+                if (selected) actionRows[i].color = Play2UGui.Hex("356560");
+                actionLabels[i].text = (selected ? "예약됨" : "예약") + "\n" + actionLabels[i].text;
+                actionLabels[i].fontSize = 16;
+            }
+        }
+        else { actionLabels[0].fontSize = 19; actionLabels[1].fontSize = 19; }
+        bool opening = packet.game.seats.All(s => s.streetContribution == 0);
+        SetAction(2, acting && !legal.bet && !legal.raise && legal.hasAllInTarget ? "올인" : opening ? "베팅" : "레이즈",
+            show, acting && (legal.bet || legal.raise || legal.hasAllInTarget));
+        SetAction(3, "고발", show, acting && packet.game.canAccuseOnTurn);
     }
 
     private void SetAction(int index, string label, bool visible, bool enabled)
     {
+        actionRows[index].GetComponent<Play2ActionButton>().Intent = $"{packet.game.handId}:{packet.game.street}:{canReserve}:{label}";
         actionRows[index].gameObject.SetActive(visible);
         actionOpacity[index].interactable = enabled;
-        actionOpacity[index].alpha = enabled ? 1f : .57f;
+        Play2HudArt.Apply(actionRows[index], enabled && index == 2 ? "GoldButton" : "PlayingAction");
+        if (!enabled) actionRows[index].color = Play2UGui.Hex("1A282BFF");
+        actionLabels[index].color = !enabled ? Play2UGui.Hex("8FA19FFF")
+            : index == 2 ? PaperInk : Play2UGui.Cream;
         actionLabels[index].text = label;
     }
 
@@ -358,9 +574,16 @@ internal sealed partial class Play2TableHud
         amountSlider.minValue = minimumBet;
         betAdjustments.gameObject.SetActive(adjustable);
         allInOption.gameObject.SetActive(legal.hasAllInTarget || maximumBet == WholeStack);
+        decimal previousTarget = -1;
+        for (int i = 0; i < potButtons.Length; i++)
+        {
+            decimal targetChips = PotTarget(potPercents[i]);
+            potButtons[i].interactable = adjustable && targetChips >= minimumBet && targetChips <= maximumBet && targetChips != previousTarget;
+            previousTarget = targetChips;
+        }
         UpdateBetAmount();
         sizing.gameObject.SetActive(true);
-        handGuide.SetActionPickerOpen(true);
+        SetPickerOpen(true);
     }
 
     private void HandleSizing(UnityEngine.InputSystem.Keyboard keyboard)
@@ -373,7 +596,7 @@ internal sealed partial class Play2TableHud
 
         if (keyboard.aKey.wasPressedThisFrame && allInOption.gameObject.activeInHierarchy) SelectBet(WholeStack);
         else if (keyboard.homeKey.wasPressedThisFrame) SelectBet(minimumBet);
-        else if (keyboard.pKey.wasPressedThisFrame) SelectHalf();
+        else if (keyboard.pKey.wasPressedThisFrame) SelectPot(50);
         else if (keyboard.leftArrowKey.wasPressedThisFrame || keyboard.rightArrowKey.wasPressedThisFrame)
         {
             long step = keyboard.shiftKey.isPressed ? 10 : 1;
@@ -389,11 +612,19 @@ internal sealed partial class Play2TableHud
         else SelectBet(Math.Clamp(betAmount + delta, minimumBet, maximumBet));
     }
 
-    private void SelectHalf()
+    private decimal PotTarget(int percent)
     {
-        long committed = packet.game.seats.Max(s => s.streetContribution);
-        long available = Math.Max(0, maximumBet - committed);
-        SelectBet(Math.Clamp(committed + Math.Min(available, packet.game.pot / 2), minimumBet, maximumBet));
+        var game = packet.game;
+        long paid = game.seats.First(s => s.seat == packet.viewerSeat).streetContribution;
+        long call = game.legal.callAmount;
+        decimal raise = decimal.Round(((decimal)game.pot + call) * percent / 100, 0, MidpointRounding.AwayFromZero);
+        return (decimal)paid + call + raise;
+    }
+
+    private void SelectPot(int percent)
+    {
+        decimal targetChips = PotTarget(percent);
+        if (targetChips >= minimumBet && targetChips <= maximumBet) SelectBet((long)targetChips);
     }
 
     private void SelectBet(long value)
@@ -437,9 +668,12 @@ internal sealed partial class Play2TableHud
 
     private void UpdateBetAmount()
     {
-        betHeading.text = betAmount == WholeStack ? "올인 금액" : packet.game.legal.raise ? "레이즈 금액" : "베팅 금액";
         long paid = packet.game.seats.First(s => s.seat == packet.viewerSeat).streetContribution;
-        target.text = $"총 {betAmount}칩   추가 {betAmount - paid}칩";
+        string action = betAmount == WholeStack ? "올인" : packet.game.seats.All(s => s.streetContribution == 0) ? "베팅" : "레이즈";
+        betHeading.text = "지금 낼 금액";
+        betCommit.text = $"{betAmount - paid}칩 {action}";
+        target.text = $"{betAmount - paid}칩";
+        betHand.text = packet.game.legal.callAmount > 0 ? $"콜 {packet.game.legal.callAmount}칩 포함" : "";
         amountSlider.SetValueWithoutNotify(betAmount > maximumBet ? maximumBet + 1 : betAmount);
     }
 
@@ -466,6 +700,7 @@ internal sealed partial class Play2TableHud
             command.oddChipRule = (int)HoldemOddChipRule.ClockwiseFromButton;
             table.Submit(command);
         }
+        else if (packet?.game?.isOver == true) table.RestartMatch();
         else table.StartHand();
     }
 
@@ -473,20 +708,40 @@ internal sealed partial class Play2TableHud
     {
         sizing.gameObject.SetActive(false);
         accusation.gameObject.SetActive(false);
-        handGuide.SetActionPickerOpen(false);
+        freeFold.gameObject.SetActive(false);
+        SetPickerOpen(false);
+    }
+
+    private void SetPickerOpen(bool open)
+    {
+        baseActions.alpha = open ? 0 : 1;
+        baseActions.interactable = baseActions.blocksRaycasts = !open;
+        handGuide.SetActionPickerOpen(open);
     }
 
     private static void ClearSelection() => UnityEngine.EventSystems.EventSystem.current?.SetSelectedGameObject(null);
 
     private static string Brief(string value, int limit) => string.IsNullOrWhiteSpace(value) ? "해석 정보 없음"
         : value.Length <= limit ? value : value.Substring(0, limit) + "…";
+    private IEnumerator HideFeedback()
+    {
+        yield return new WaitForSecondsRealtime(4);
+        feedback.text = "";
+        feedback.transform.parent.gameObject.SetActive(false);
+        feedbackRoutine = null;
+    }
     private void ShowNotice(string key, string message)
     {
         if (!shownNotices.Add(key)) return;
+        if (feedbackRoutine != null) owner.StopCoroutine(feedbackRoutine);
+        feedbackRoutine = null;
+        feedback.text = "";
+        feedback.transform.parent.gameObject.SetActive(false);
         noticeKey = key; notice.text = message; notice.transform.parent.gameObject.SetActive(true);
-        owner.StartCoroutine(HideNotice(key));
+        noticeUntil = Time.unscaledTime + (key.StartsWith("dealer:") ? 7f : VerdictReadTime);
+        owner.StartCoroutine(HideNotice(key, noticeUntil));
     }
-    private IEnumerator HideNotice(string key)
+    private IEnumerator HideNotice(string key, float until)
     {
         var panel = notice.transform.parent;
         float elapsed = 0f;
@@ -496,13 +751,14 @@ internal sealed partial class Play2TableHud
             panel.localScale = Vector3.one * Mathf.Lerp(.85f, 1f, Mathf.Clamp01(elapsed / .25f));
             yield return null;
         }
-        yield return new WaitForSecondsRealtime(key.StartsWith("dealer:") ? 6.75f : 2.35f);
+        while (Time.unscaledTime < until && noticeKey == key) yield return null;
         if (noticeKey == key) notice.transform.parent.gameObject.SetActive(false);
     }
     private void RaiseTo(long amount) => Act(packet.game.legal.bet || (!packet.game.legal.raise
         && packet.game.seats.All(s => s.streetContribution == 0)) ? BettingActionKind.BetTo : BettingActionKind.RaiseTo, amount);
     private void Act(BettingActionKind kind, long amount = 0)
     {
+        if (!acting || table.ActionPending) return;
         var request = Command("act"); request.action = (int)kind; request.target = amount;
         if (table.Submit(request)) CloseActionPanels();
     }

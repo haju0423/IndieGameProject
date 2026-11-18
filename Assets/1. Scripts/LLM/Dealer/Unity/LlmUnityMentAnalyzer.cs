@@ -101,12 +101,11 @@ namespace Poker.Llm.Unity
                     await Task.Delay(50, token);
                 }
 
+                // Both agents share the native model. Prepare their first contexts in order.
+                await ChatAsync(agent, _gate, null, timeoutSeconds, token, warmup: true);
                 if (UsesInterpreter && IsAgentReady(interpreterAgent))
-                    await Task.WhenAll(
-                        ChatAsync(agent, _gate, null, timeoutSeconds, token, warmup: true),
-                        ChatAsync(interpreterAgent, _interpreterGate, null, interpreterTimeoutSeconds, token, warmup: true));
-                else
-                    await ChatAsync(agent, _gate, null, timeoutSeconds, token, warmup: true);
+                    await ChatAsync(interpreterAgent, _interpreterGate, null,
+                        interpreterTimeoutSeconds, token, warmup: true);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { }
             catch (Exception ex)

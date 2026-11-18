@@ -17,11 +17,14 @@ public sealed class Play2Lobby : MonoBehaviour
     private Button ready, start, copy;
     private readonly Label[] seatNames = new Label[4], seatStates = new Label[4];
     private readonly GameObject[] actors = new GameObject[4];
+    private readonly Transform[] stands = new Transform[4];
+    private Camera lobbyCamera;
     private readonly bool[] wasReady = new bool[4];
     private readonly List<Material> stageMaterials = new List<Material>();
     private GameObject stage;
     private HoldemRoomPacket lastPacket;
     private string lastStatus;
+    private bool lastPending;
 
     private void Start()
     {
@@ -56,12 +59,15 @@ public sealed class Play2Lobby : MonoBehaviour
             var seat = new VisualElement();
             seat.AddToClassList("seat");
             seatNames[i] = new Label();
+            seatNames[i].enableRichText = false;
             seatNames[i].AddToClassList("seat-name");
             seatStates[i] = new Label();
             seatStates[i].AddToClassList("seat-state");
             seat.Add(seatNames[i]);
             seat.Add(seatStates[i]);
             seats.Add(seat);
+            int index = i;
+            seat.RegisterCallback<GeometryChangedEvent>(_ => AlignStand(index, seat));
         }
 
         BuildStage(models);
@@ -77,9 +83,11 @@ public sealed class Play2Lobby : MonoBehaviour
     private void Present(HoldemRoomPacket packet, string status)
     {
         if (packet == null || packet.hasGame) return;
-        if (ReferenceEquals(packet, lastPacket) && status == lastStatus) return;
+        bool pending = session.ActionPending;
+        if (ReferenceEquals(packet, lastPacket) && status == lastStatus && pending == lastPending) return;
         lastPacket = packet;
         lastStatus = status;
+        lastPending = pending;
 
         int count = packet.rules.seatCapacity;
         roomLabel.text = session.IsLocal ? "로컬 프리뷰" : session.RoomCode + "  ·  " + packet.members.Length + "/" + count;
@@ -89,7 +97,8 @@ public sealed class Play2Lobby : MonoBehaviour
         Show(ready, !session.IsLocal);
         ready.text = mine?.ready == true ? "준비 취소" : "준비";
         Show(start, session.IsHost);
-        start.SetEnabled(allReady);
+        start.SetEnabled(allReady && !pending);
+        start.text = pending ? "시작 중" : "게임 시작";
         lobbyDetail.text = !string.IsNullOrEmpty(status) ? status
             : session.IsLocal ? "네 좌석의 카드 배분을 연습합니다."
             : allReady ? "모두 준비되었습니다."
@@ -100,6 +109,8 @@ public sealed class Play2Lobby : MonoBehaviour
         {
             var member = packet.members.FirstOrDefault(m => m.seat == i + 1);
             var plate = seatNames[i].parent;
+            Show(plate, i < count);
+            stands[i].gameObject.SetActive(i < count);
             bool occupied = member?.connected == true;
             bool isReady = occupied && member.ready;
             bool entering = occupied && !actors[i].activeSelf;
@@ -110,7 +121,7 @@ public sealed class Play2Lobby : MonoBehaviour
                 StartCoroutine(RevealActor(actors[i].transform, end));
             }
             seatNames[i].text = member == null ? "빈자리" : member.name + (member.host ? "  ·  방장" : "");
-            seatStates[i].text = i >= count ? "닫힌 자리" : member == null ? "입장 대기"
+            seatStates[i].text = member == null ? "입장 대기"
                 : !occupied ? "연결 끊김" : isReady ? "✓ 준비 완료" : "준비 중";
             plate.EnableInClassList("mine", i + 1 == packet.viewerSeat);
             seatStates[i].EnableInClassList("ready", isReady);
@@ -161,7 +172,7 @@ public sealed class Play2Lobby : MonoBehaviour
         cameraObject.transform.SetParent(stage.transform, false);
         cameraObject.transform.localPosition = new Vector3(0f, 1.62f, -6f);
         cameraObject.transform.localRotation = Quaternion.Euler(8f, 0f, 0f);
-        var lobbyCamera = cameraObject.AddComponent<Camera>();
+        lobbyCamera = cameraObject.AddComponent<Camera>();
         cameraObject.AddComponent<AudioListener>();
         lobbyCamera.orthographic = true;
         lobbyCamera.orthographicSize = 1.45f;
@@ -175,29 +186,56 @@ public sealed class Play2Lobby : MonoBehaviour
         stageMaterials.Add(wood);
         var darkerWood = new Material(wood) { color = new Color(0.21f, 0.10f, 0.055f) };
         stageMaterials.Add(darkerWood);
+        var plaster = new Material(wood) { color = new Color(.15f, .22f, .18f) };
+        stageMaterials.Add(plaster);
+        Block("Back wall", new Vector3(0f, 1.8f, 2.0f), new Vector3(15f, 4f, .15f), plaster);
+        Block("Wainscot", new Vector3(0f, .35f, 1.89f), new Vector3(15f, .70f, .12f), darkerWood);
+        Block("Chair rail", new Vector3(0f, .72f, 1.81f), new Vector3(15f, .065f, .11f), wood);
+        for (int i = -5; i <= 5; i++)
+            Block("Panel stile", new Vector3(i * 1.12f, .34f, 1.81f), new Vector3(.055f, .68f, .055f), wood);
+        var pendant = Resources.Load<GameObject>("TablePresentation/LobbyPendant");
+        foreach (float x in new[] { -1.40f, 1.40f })
+        {
+            Block("Lamp rod", new Vector3(x, 2.37f, 1.29f), new Vector3(.016f, 1.12f, .016f), darkerWood);
+            var lamp = Instantiate(pendant, stage.transform, false);
+            lamp.transform.localPosition = new Vector3(x, 1.78f, 1.29f);
+            lamp.transform.localScale *= .82f;
+            StageLight(new Vector3(x, 1.59f, 1.27f), new Color(1f, .78f, .51f), 1.15f);
+        }
         for (int i = 0; i < 24; i++)
             Block("Stage plank", new Vector3((i - 11.5f) * 0.38f, -0.065f, 0.5f),
                 new Vector3(0.375f, 0.13f, 13f), i % 3 == 0 ? darkerWood : wood);
         for (int i = 0; i < actors.Length; i++)
         {
-            float x = (i - 1.5f) * 1.22f;
-            Block("Seat riser", new Vector3(x, 0.19f, 0.29f), new Vector3(0.58f, 0.38f, 0.48f), darkerWood);
-            actors[i] = Instantiate(models[i], stage.transform);
-            actors[i].transform.localPosition = new Vector3(x, 0.19f, 0f);
+            stands[i] = new GameObject("Lobby seat " + (i + 1)).transform;
+            stands[i].SetParent(stage.transform, false);
+            Block("Seat riser", new Vector3(0f, 0.19f, 0.29f), new Vector3(0.58f, 0.38f, 0.48f), darkerWood, stands[i]);
+            actors[i] = Instantiate(models[i], stands[i]);
+            actors[i].transform.localPosition = new Vector3(0f, 0.19f, 0f);
             actors[i].transform.localRotation = Quaternion.Euler(0f, 180f + (i - 1.5f) * 8f, 0f);
             actors[i].SetActive(false);
         }
         StageLight(new Vector3(-2f, 3f, -3f), new Color(1f, 0.72f, 0.46f), 7f);
-        StageLight(new Vector3(2f, 2f, 1f), new Color(0.96f, 0.57f, 0.26f), 4f);
+        StageLight(new Vector3(2.3f, 2.1f, -.1f), new Color(.96f, .64f, .40f), 3.5f);
 
     }
 
-    private void Block(string label, Vector3 position, Vector3 size, Material material)
+    private void AlignStand(int index, VisualElement plate)
+    {
+        if (stands[index] == null || lobbyCamera == null) return;
+        Rect bounds = lobby.worldBound;
+        if (bounds.width <= 0 || plate.worldBound.width <= 0) return;
+        float viewportX = (plate.worldBound.center.x - bounds.xMin) / bounds.width;
+        float x = (viewportX - .5f) * 2f * lobbyCamera.orthographicSize * lobbyCamera.aspect;
+        stands[index].localPosition = new Vector3(x, 0f, 0f);
+    }
+
+    private void Block(string label, Vector3 position, Vector3 size, Material material, Transform parent = null)
     {
         var block = GameObject.CreatePrimitive(PrimitiveType.Cube);
         block.name = label;
         Destroy(block.GetComponent<Collider>());
-        block.transform.SetParent(stage.transform, false);
+        block.transform.SetParent(parent != null ? parent : stage.transform, false);
         block.transform.localPosition = position;
         block.transform.localScale = size;
         block.GetComponent<Renderer>().sharedMaterial = material;

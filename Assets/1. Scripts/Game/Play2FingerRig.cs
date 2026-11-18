@@ -34,6 +34,10 @@ public sealed partial class Play2FingerRig : MonoBehaviour
 
     internal static Play2FingerRig Attach(Animator animator)
     {
+        // Every procedural hand needs skinning even when its imported animation is culled.
+        animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+        foreach (var renderer in animator.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+            renderer.updateWhenOffscreen = true;
         if (animator.TryGetComponent(out Play2FingerRig rig)) return rig;
         var skin = animator.GetComponentInChildren<SkinnedMeshRenderer>(true);
         if (skin == null || !TryGetHands(skin.sharedMesh.name, out var left, out var right)) return null;
@@ -55,9 +59,71 @@ public sealed partial class Play2FingerRig : MonoBehaviour
 
     public int FingerCount(bool left) => hands[left ? 0 : 1].Length;
 
+    internal Quaternion PalmRotation(bool left, Vector3 direction, Vector3 palmNormal)
+    {
+        var hand = hands[left ? 0 : 1];
+        Vector3 length = hand[2].Bend - hand[2].Base;
+        Vector3 width = hand[hand.Length - 1].Base - hand[1].Base;
+        Vector3 normal = Vector3.Cross(length, width) * (left ? 1f : -1f);
+        return Quaternion.LookRotation(direction, palmNormal)
+            * Quaternion.Inverse(Quaternion.LookRotation(length, normal));
+    }
+
+    internal Quaternion ThumbsDownRotation(bool left, Vector3 palmNormal)
+    {
+        var hand = hands[left ? 0 : 1];
+        var thumb = hand[0];
+        Vector3 thumbDirection = Vector3.ProjectOnPlane(thumb.Base - hand[2].Base, hand[2].Bend - hand[2].Base);
+        Vector3 length = hand[2].Bend - hand[2].Base;
+        Vector3 width = hand[hand.Length - 1].Base - hand[1].Base;
+        Vector3 normal = Vector3.Cross(length, width) * (left ? 1f : -1f);
+        return Quaternion.LookRotation(Vector3.down, palmNormal)
+            * Quaternion.Inverse(Quaternion.LookRotation(thumbDirection, normal));
+    }
+
+    internal Quaternion PointingRotation(bool left, Vector3 direction)
+    {
+        var hand = hands[left ? 0 : 1];
+        var index = hand[1];
+        var local = Quaternion.LookRotation(index.Bend - index.Base, hand[0].Base - index.Base);
+        return Quaternion.LookRotation(direction, Vector3.up) * Quaternion.Inverse(local);
+    }
+
     public void SetFingerCurl(bool left, int finger, float curl)
     {
         hands[left ? 0 : 1][finger].Curl(Mathf.Clamp01(curl));
+    }
+
+    internal void SetGestureCurl(bool left, int finger, float curl)
+    {
+        hands[left ? 0 : 1][finger].Curl(Mathf.Clamp01(curl) * 2f);
+    }
+
+    internal void ExtendFinger(bool left, int finger, float amount)
+    {
+        var digit = hands[left ? 0 : 1][finger];
+        var straight = Quaternion.FromToRotation(digit.Tip - digit.Bend, digit.Bend - digit.Base);
+        digit.Distal.localRotation = Quaternion.Slerp(Quaternion.identity, straight, amount);
+    }
+
+    internal void FoldThumb(bool left, float amount, bool tuck = false)
+    {
+        var hand = hands[left ? 0 : 1];
+        var thumb = hand[0];
+        Vector3 target = hand[tuck ? 2 : 1].Base;
+        var folded = Quaternion.FromToRotation(thumb.Tip - thumb.Base, target - thumb.Base);
+        thumb.Proximal.localRotation = Quaternion.RotateTowards(Quaternion.identity, folded, 45f * amount);
+        thumb.Distal.localRotation = Quaternion.AngleAxis(25f * amount, thumb.BendAxis);
+    }
+
+    internal void ExtendThumb(bool left, float amount)
+    {
+        var hand = hands[left ? 0 : 1];
+        var thumb = hand[0];
+        Vector3 lateral = Vector3.ProjectOnPlane(thumb.Base - hand[2].Base, hand[2].Bend - hand[2].Base);
+        var rotation = Quaternion.FromToRotation(thumb.Bend - thumb.Base, lateral);
+        thumb.Proximal.localRotation = Quaternion.Slerp(Quaternion.identity, rotation, amount);
+        ExtendFinger(left, 0, amount);
     }
 
     internal void SetGrip(float curl)
@@ -97,10 +163,12 @@ public sealed partial class Play2FingerRig : MonoBehaviour
         var bones = new List<Transform>(skin.bones);
         var bindPoses = new List<Matrix4x4>(source.bindposes);
         var wrists = new int[2];
+        var forearms = new int[2];
         for (int side = 0; side < hands.Length; side++)
         {
             var wrist = animator.GetBoneTransform(side == 0 ? HumanBodyBones.LeftHand : HumanBodyBones.RightHand);
             int wristIndex = wrists[side] = bones.IndexOf(wrist);
+            forearms[side] = bones.IndexOf(animator.GetBoneTransform(side == 0 ? HumanBodyBones.LeftLowerArm : HumanBodyBones.RightLowerArm));
             var wristBind = bindPoses[wristIndex];
             for (int i = 0; i < hands[side].Length; i++)
             {
@@ -119,7 +187,7 @@ public sealed partial class Play2FingerRig : MonoBehaviour
         riggedMesh = Instantiate(source);
         riggedMesh.name = source.name + " (Finger Rig)";
         riggedMesh.bindposes = bindPoses.ToArray();
-        Reweight(source, wrists, bindPoses);
+        Reweight(source, wrists, forearms, bindPoses);
         skin.bones = bones.ToArray();
         skin.sharedMesh = riggedMesh;
     }
@@ -132,15 +200,18 @@ public sealed partial class Play2FingerRig : MonoBehaviour
         return joint;
     }
 
-    private void Reweight(Mesh source, int[] wrists, List<Matrix4x4> bindPoses)
+    private void Reweight(Mesh source, int[] wrists, int[] forearms, List<Matrix4x4> bindPoses)
     {
         var vertices = source.vertices;
+        var surfaceMaps = new (int digit, float distance)[hands.Length][];
+        for (int side = 0; side < hands.Length; side++)
+            surfaceMaps[side] = MapDigits(source, bindPoses[wrists[side]], hands[side]);
         var counts = source.GetBonesPerVertex();
         var sourceWeights = source.GetAllBoneWeights();
         var newCounts = new byte[vertices.Length];
         var newWeights = new List<BoneWeight1>(sourceWeights.Length);
-        // Only redistribute the wrist's share. The shoulder, forearm and all body weights stay intact.
-        var vertexWeights = new BoneWeight1[MaxSkinWeights + 2];
+        // Imported fingertips can carry forearm weight. Fade both contributions into the digit joints.
+        var vertexWeights = new BoneWeight1[bindPoses.Count];
         int offset = 0;
         for (int vertex = 0; vertex < vertices.Length; vertex++)
         {
@@ -150,20 +221,39 @@ public sealed partial class Play2FingerRig : MonoBehaviour
             {
                 var weight = sourceWeights[offset++];
                 int side = Array.IndexOf(wrists, weight.boneIndex);
-                if (side < 0 || !FindFinger(hands[side], bindPoses[weight.boneIndex].MultiplyPoint3x4(vertices[vertex]),
-                        weight.boneIndex, out int first, out int second, out float blend))
+                if (side < 0) side = Array.IndexOf(forearms, weight.boneIndex);
+                if (side < 0)
                 {
-                    vertexWeights[written++] = weight;
+                    Append(weight);
                     continue;
                 }
 
-                if (count == MaxSkinWeights)
-                    vertexWeights[written++] = new BoneWeight1 { boneIndex = blend < 0.5f ? first : second, weight = weight.weight };
-                else
+                var mapped = surfaceMaps[side][vertex];
+                Vector3 point = bindPoses[wrists[side]].MultiplyPoint3x4(vertices[vertex]);
+                FindFinger(hands[side], mapped.digit, mapped.distance, point,
+                    out int first, out int second, out float blend, out float influence);
+                float remaining = weight.weight * (1f - influence);
+                if (weight.boneIndex == forearms[side])
                 {
-                    if (blend < 1f) vertexWeights[written++] = new BoneWeight1 { boneIndex = first, weight = weight.weight * (1f - blend) };
-                    if (blend > 0f) vertexWeights[written++] = new BoneWeight1 { boneIndex = second, weight = weight.weight * blend };
+                    float palm = Mathf.SmoothStep(0f, 1f, (point.y + .035f) / .055f);
+                    Append(new BoneWeight1 { boneIndex = wrists[side], weight = remaining * palm });
+                    Append(new BoneWeight1 { boneIndex = forearms[side], weight = remaining * (1f - palm) });
                 }
+                else Append(new BoneWeight1 { boneIndex = weight.boneIndex, weight = remaining });
+                Append(new BoneWeight1 { boneIndex = first, weight = weight.weight * influence * (1f - blend) });
+                Append(new BoneWeight1 { boneIndex = second, weight = weight.weight * influence * blend });
+            }
+
+            void Append(BoneWeight1 weight)
+            {
+                if (weight.weight <= 0f) return;
+                for (int i = 0; i < written; i++)
+                {
+                    if (vertexWeights[i].boneIndex != weight.boneIndex) continue;
+                    vertexWeights[i].weight += weight.weight;
+                    return;
+                }
+                vertexWeights[written++] = weight;
             }
 
             // Unity expects each vertex's most influential bone first.
@@ -178,8 +268,15 @@ public sealed partial class Play2FingerRig : MonoBehaviour
                 }
                 vertexWeights[j] = weight;
             }
+            written = Mathf.Min(written, MaxSkinWeights);
+            float total = 0;
+            for (int i = 0; i < written; i++) total += vertexWeights[i].weight;
             newCounts[vertex] = (byte)written;
-            for (int i = 0; i < written; i++) newWeights.Add(vertexWeights[i]);
+            for (int i = 0; i < written; i++)
+            {
+                vertexWeights[i].weight /= total;
+                newWeights.Add(vertexWeights[i]);
+            }
         }
 
         using var vertexCounts = new NativeArray<byte>(newCounts, Allocator.Temp);
@@ -187,45 +284,102 @@ public sealed partial class Play2FingerRig : MonoBehaviour
         riggedMesh.SetBoneWeights(vertexCounts, weights);
     }
 
-    private static bool FindFinger(Finger[] fingers, Vector3 point, int wrist,
-        out int first, out int second, out float blend)
+    private static void FindFinger(Finger[] fingers, int digit, float distance, Vector3 point,
+        out int first, out int second, out float blend, out float influence)
     {
-        first = second = wrist;
-        blend = 0f;
-        Finger nearest = null;
-        float distance = float.PositiveInfinity;
-        foreach (var finger in fingers)
-        {
-            float candidate = Mathf.Min(SegmentDistance(point, finger.Base, finger.Bend),
-                SegmentDistance(point, finger.Bend, finger.Tip));
-            if (candidate >= distance) continue;
-            nearest = finger;
-            distance = candidate;
-        }
-
-        Vector3 along = (nearest.Tip - nearest.Base).normalized;
-        float length = Vector3.Dot(point - nearest.Base, along);
-        float middle = Vector3.Dot(nearest.Bend - nearest.Base, along);
-        float transition = middle * 0.45f;
-        if (length <= -transition || distance > 0.033f * 0.033f) return false;
-        if (length < middle - transition)
-        {
-            second = nearest.BoneIndex;
-            blend = Mathf.SmoothStep(0f, 1f, (length + transition) / (middle * 0.90f));
-        }
-        else
-        {
-            first = nearest.BoneIndex;
-            second = first + 1;
-            blend = Mathf.SmoothStep(0f, 1f, (length - middle + transition) / (2f * transition));
-        }
-        return true;
+        first = second = 0;
+        blend = influence = 0f;
+        if (digit < 0 || float.IsPositiveInfinity(distance)) return;
+        var finger = fingers[digit];
+        float proximal = Vector3.Distance(finger.Base, finger.Bend);
+        float distal = Vector3.Distance(finger.Bend, finger.Tip);
+        float progress = proximal + distal - distance;
+        if (finger.Thumb)
+            progress = Mathf.Max(progress, Vector3.Dot(point - finger.Base, (finger.Tip - finger.Base).normalized));
+        first = finger.BoneIndex;
+        second = first + 1;
+        blend = Mathf.SmoothStep(0f, 1f, (progress - proximal * .65f) / (proximal * .7f));
+        influence = Mathf.SmoothStep(0f, 1f, progress / (proximal * 1.1f));
     }
 
-    private static float SegmentDistance(Vector3 point, Vector3 from, Vector3 to)
+    private static (int digit, float distance)[] MapDigits(Mesh mesh, Matrix4x4 wristBind, Finger[] fingers)
     {
-        Vector3 axis = to - from;
-        return (point - from - axis * Mathf.Clamp01(Vector3.Dot(point - from, axis) / axis.sqrMagnitude)).sqrMagnitude;
+        // Follow the connected surface so a curved fingertip cannot be assigned to the next finger across the gap.
+        var vertices = mesh.vertices;
+        var welded = new Dictionary<Vector3Int, int>();
+        var points = new List<Vector3>();
+        var vertexNodes = new int[vertices.Length];
+        Array.Fill(vertexNodes, -1);
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            Vector3 point = wristBind.MultiplyPoint3x4(vertices[i]);
+            if (point.y < -.02f || point.sqrMagnitude > .16f * .16f) continue;
+            var key = Vector3Int.RoundToInt(point * 10000f);
+            if (!welded.TryGetValue(key, out int node))
+            {
+                node = points.Count;
+                welded.Add(key, node);
+                points.Add(point);
+            }
+            vertexNodes[i] = node;
+        }
+        var neighbors = new HashSet<int>[points.Count];
+        for (int i = 0; i < neighbors.Length; i++) neighbors[i] = new HashSet<int>();
+        var triangles = mesh.triangles;
+        for (int i = 0; i < triangles.Length; i += 3)
+        for (int edge = 0; edge < 3; edge++)
+        {
+            int a = vertexNodes[triangles[i + edge]], b = vertexNodes[triangles[i + (edge + 1) % 3]];
+            if (a < 0 || b < 0 || a == b) continue;
+            neighbors[a].Add(b);
+            neighbors[b].Add(a);
+        }
+        var labels = new int[points.Count];
+        var best = new float[points.Count];
+        Array.Fill(best, float.PositiveInfinity);
+        for (int finger = 0; finger < fingers.Length; finger++)
+        {
+            int seed = -1;
+            float closest = float.PositiveInfinity;
+            for (int node = 0; node < points.Count; node++)
+            {
+                float distance = (points[node] - fingers[finger].Tip).sqrMagnitude;
+                if (distance >= closest) continue;
+                closest = distance;
+                seed = node;
+            }
+            if (seed < 0) continue;
+            var distances = new float[points.Count];
+            Array.Fill(distances, float.PositiveInfinity);
+            distances[seed] = 0;
+            var pending = new SortedSet<(float distance, int node)> { (0, seed) };
+            while (pending.Count > 0)
+            {
+                var current = pending.Min;
+                pending.Remove(current);
+                foreach (int neighbor in neighbors[current.node])
+                {
+                    float distance = current.distance + Vector3.Distance(points[current.node], points[neighbor]);
+                    if (distance >= distances[neighbor]) continue;
+                    pending.Remove((distances[neighbor], neighbor));
+                    distances[neighbor] = distance;
+                    pending.Add((distance, neighbor));
+                }
+            }
+            for (int node = 0; node < points.Count; node++)
+            {
+                if (distances[node] >= best[node]) continue;
+                best[node] = distances[node];
+                labels[node] = finger;
+            }
+        }
+        var result = new (int digit, float distance)[vertices.Length];
+        for (int i = 0; i < result.Length; i++)
+        {
+            int node = vertexNodes[i];
+            result[i] = node >= 0 ? (labels[node], best[node]) : (-1, float.PositiveInfinity);
+        }
+        return result;
     }
 
     private void OnDestroy()

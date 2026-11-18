@@ -18,8 +18,8 @@
                     <ui:Label text="◆" class="dialog-mark" />
                 </ui:VisualElement>
                 <ui:VisualElement name="room-fields">
-                    <ui:TextField name="nickname" label="닉네임" maxlength="20" />
-                    <ui:TextField name="room-code" label="방 코드" maxlength="24" />
+                    <ui:TextField name="nickname" label="닉네임" max-length="20" />
+                    <ui:TextField name="room-code" label="방 코드" max-length="24" />
                     <ui:DropdownField name="capacity" label="방 인원" />
                 </ui:VisualElement>
                 <ui:VisualElement name="settings-fields" class="title-hidden">

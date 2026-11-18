@@ -1,11 +1,14 @@
 using Poker.Application;
 using UnityEngine;
+using TMPro;
 
 public sealed class Play2FrontEnd : MonoBehaviour
 {
     [SerializeField] private Play2ChatCanvas chatCanvas;
 
     private Play2TableHud hud;
+    internal Transform HudRoot { get; private set; }
+    internal TMP_FontAsset Font => chatCanvas.Font;
 
     public void Initialize(Play2TablePreview table)
     {
@@ -23,14 +26,15 @@ public sealed class Play2FrontEnd : MonoBehaviour
         chatCanvas.GetComponent<UnityEngine.UI.CanvasScaler>().screenMatchMode = scaler.screenMatchMode;
         chatCanvas.GetComponent<Canvas>().sortingOrder = 10;
         hud = new Play2TableHud(canvasObject.transform, table, chatCanvas.Font, this);
+        HudRoot = canvasObject.transform.Find("Game HUD");
     }
 
-    public void Present(HoldemRoomPacket packet, string status)
+    public void Present(HoldemRoomPacket packet, string status, bool blockActions = false)
     {
         hud.Present(packet, status);
         chatCanvas.Present(packet);
         if (!hud.CanOpenChat) chatCanvas.DiscardFocusRequest();
         else if (chatCanvas.HandleEnter()) return;
-        hud.HandleKeys(chatCanvas.IsTyping);
+        hud.HandleKeys(chatCanvas.IsTyping || blockActions);
     }
 }

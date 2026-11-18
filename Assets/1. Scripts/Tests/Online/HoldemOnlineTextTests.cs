@@ -5,6 +5,7 @@ namespace Poker.Online.Tests
     public sealed class HoldemOnlineTextTests
     {
         [TestCase("GameIsFull", "꽉 찼어요")]
+        [TestCase("ServerFull", "꽉 찼어요")]
         [TestCase("Full", "꽉 찼어요")]
         [TestCase("GameNotFound", "방을 찾지")]
         [TestCase("SessionGone", "새로 참가")]

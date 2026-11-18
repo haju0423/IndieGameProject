@@ -23,9 +23,9 @@
 .lobby-top { justify-content: space-between; align-items: flex-start; min-height: 75px; }
 .lobby-heading { position: absolute; left: 24%; right: 24%; align-items: center; }
 .eyebrow { font-size: 14px; color: #e8833a; letter-spacing: 3px; -unity-font-style: bold; }
-.seats { position: absolute; bottom: 18%; left: 4%; right: 4%; justify-content: space-evenly; }
+.seats { position: absolute; bottom: 18%; left: 4%; right: 4%; justify-content: center; }
 .seat {
-    width: 21%; min-height: 61px; padding: 7px 4px; align-items: center;
+    width: 21%; min-height: 61px; margin: 0 2%; padding: 7px 4px; align-items: center;
     background-color: rgba(22, 16, 12, 0.92); border-width: 1px; border-color: #846647; border-radius: 9px;
 }
 .seat.mine { border-color: #e8833a; }

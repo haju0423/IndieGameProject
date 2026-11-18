@@ -17,10 +17,10 @@ public sealed partial class Play2FingerRig
                     Millimeters(1, 14, 41), Millimeters(7, 40, 48), Millimeters(10, 64, 50));
                 right = Hand(Millimeters(-844, 386, -371),
                     Millimeters(-31, 21, -28), Millimeters(-29, 39, -42), Millimeters(-26, 54, -50),
-                    Millimeters(17, 28, -42), Millimeters(21, 56, -54), Millimeters(21, 76, -59),
-                    Millimeters(23, 30, -18), Millimeters(30, 58, -20), Millimeters(26, 81, -30),
-                    Millimeters(24, 31, 11), Millimeters(25, 63, 12), Millimeters(20, 88, 5),
-                    Millimeters(16, 28, 35), Millimeters(20, 53, 39), Millimeters(9, 87, 33));
+                    Millimeters(17, 28, -42), Millimeters(16, 60, -52), Millimeters(5, 88, -49),
+                    Millimeters(23, 30, -18), Millimeters(30, 60, -23), Millimeters(5, 93, -21),
+                    Millimeters(24, 31, 11), Millimeters(34, 60, 8), Millimeters(8, 92, 8),
+                    Millimeters(16, 28, 35), Millimeters(15, 60, 37), Millimeters(2, 88, 35));
                 return true;
             case "tripo_node_5afea4ce": // Cow
                 left = Hand(Millimeters(717, 331, -613),
@@ -30,8 +30,8 @@ public sealed partial class Play2FingerRig
                     Millimeters(-6, 8, 38), Millimeters(1, 24, 53), Millimeters(7, 44, 58));
                 right = Hand(Millimeters(-620, 284, -731),
                     Millimeters(-25, 18, -40), Millimeters(-20, 30, -53), Millimeters(-11, 39, -64),
-                    Millimeters(25, 32, -22), Millimeters(34, 56, -40), Millimeters(34, 74, -46),
-                    Millimeters(9, 32, 24), Millimeters(17, 57, 12), Millimeters(18, 78, -4),
+                    Millimeters(25, 32, -22), Millimeters(30, 62, -45), Millimeters(27, 77, -46),
+                    Millimeters(9, 32, 24), Millimeters(8, 59, 20), Millimeters(15, 79, -6),
                     Millimeters(6, 10, 42), Millimeters(1, 33, 54), Millimeters(-2, 57, 54));
                 return true;
             case "tripo_node_e21e8167": // Fox

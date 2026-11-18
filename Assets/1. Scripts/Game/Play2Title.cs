@@ -16,8 +16,8 @@ public sealed class Play2Title : MonoBehaviour
     private TextField nickname, room;
     private DropdownField capacity;
     private Label heading, detail, notice, volumeValue;
-    private Button confirm, cancel;
-    private bool wasConnecting;
+    private Button confirm, cancel, reconnect;
+    private bool wasConnecting, wasReconnectAvailable;
     private string lastStatus;
     private Texture2D scrim;
 
@@ -31,6 +31,11 @@ public sealed class Play2Title : MonoBehaviour
         scrim = CreateScrim();
         root.Q("scrim").style.backgroundImage = new StyleBackground(scrim);
         menu = root.Q("menu");
+        reconnect = new Button(() => session.Reconnect()) { name = "reconnect", text = "다시 연결" };
+        reconnect.AddToClassList("menu-button");
+        reconnect.AddToClassList("featured");
+        menu.Insert(1, reconnect);
+        Show(reconnect, session.CanReconnect);
         modal = root.Q("form");
         fields = root.Q("room-fields");
         settings = root.Q("settings-fields");
@@ -42,7 +47,7 @@ public sealed class Play2Title : MonoBehaviour
         room = root.Q<TextField>("room-code");
         capacity = root.Q<DropdownField>("capacity");
         capacity.choices = new System.Collections.Generic.List<string> { "2명", "3명", "4명" };
-        capacity.index = 1;
+        capacity.index = capacity.choices.IndexOf("4명");
 
         var volume = root.Q<Slider>("master-volume");
         volumeValue = root.Q<Label>("volume-value");
@@ -75,8 +80,10 @@ public sealed class Play2Title : MonoBehaviour
         if (session == null) return;
         bool connecting = session.IsConnecting;
         string status = session.Status;
-        if (connecting == wasConnecting && status == lastStatus) return;
+        if (connecting == wasConnecting && status == lastStatus && wasReconnectAvailable == session.CanReconnect) return;
         wasConnecting = connecting;
+        wasReconnectAvailable = session.CanReconnect;
+        Show(reconnect, session.CanReconnect);
         lastStatus = status;
         menu.SetEnabled(!connecting && session.State == null && openForm == Form.Closed);
         confirm.SetEnabled(!connecting && session.State == null);
@@ -84,9 +91,12 @@ public sealed class Play2Title : MonoBehaviour
         if (openForm == Form.Host || openForm == Form.Join)
         {
             if (connecting) detail.text = "방에 연결하는 중...";
-            else if (!string.IsNullOrEmpty(status)) detail.text = "연결 실패 · " + status;
+            else if (!string.IsNullOrEmpty(status)) detail.text = Poker.Online.HoldemOnlineText.ConnectionFailure(status);
         }
-        else if (openForm == Form.Closed) notice.text = string.IsNullOrEmpty(status) ? "" : "방 연결이 종료되었습니다.";
+        notice.text = session.CanReconnect
+            ? connecting ? "다시 연결하는 중..." : session.ReconnectRoom + " 연결이 끊겼습니다. 다시 연결할 수 있습니다."
+            : status == "HostEnded" ? "방장이 나가 방이 종료됐어요."
+            : string.IsNullOrEmpty(status) ? "" : Poker.Online.HoldemOnlineText.ConnectionFailure(status);
     }
 
     private void OpenForm(Form next)
@@ -94,6 +104,7 @@ public sealed class Play2Title : MonoBehaviour
         if (openForm == Form.Settings) PlayerPrefs.Save();
         openForm = next;
         Show(modal, next != Form.Closed);
+        Show(notice, next == Form.Closed);
         menu.SetEnabled(next == Form.Closed);
         if (next == Form.Closed) return;
 
@@ -127,9 +138,11 @@ public sealed class Play2Title : MonoBehaviour
         string name = nickname.value.Trim();
         string code = room.value.Trim().ToUpperInvariant();
         if (name.Length == 0) { detail.text = "닉네임을 입력해 주세요."; return; }
-        if (code.Length < 6 || code.Any(c => !(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9') && c != '-'))
+        if (!Poker.Application.HoldemPlayerText.IsValidSingleLine(name))
+        { detail.text = "닉네임은 줄바꿈 없이 입력해 주세요."; return; }
+        if (code.Length < 6 || code.Length > 24 || code.Any(c => !(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9') && c != '-'))
         {
-            detail.text = "방 코드는 영문, 숫자, 하이픈으로 6자 이상 입력해 주세요.";
+            detail.text = "방 코드는 영문, 숫자, 하이픈으로 6~24자를 입력해 주세요.";
             return;
         }
         PlayerPrefs.SetString("Play2.Nickname", name);

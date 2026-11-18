@@ -6,9 +6,36 @@ using UnityEngine.Events;
 internal static class Play2HudArt
 {
     private static readonly Dictionary<string, Sprite> Sprites = new();
+    private static Sprite rounded;
+    private static readonly Dictionary<string, Color> Surfaces = new()
+    {
+        { "PinePanel", Play2UGui.Hex("18282AF5") },
+        { "PlayingPanel", Play2UGui.Hex("18282AF5") },
+        { "PlayingChat", Play2UGui.Hex("152124EF") },
+        { "PlayingBadge", Play2UGui.Hex("172427E8") },
+        { "PlayingAction", Play2UGui.Hex("293C3EFF") },
+        { "GoldButton", Play2UGui.Hex("E7D3A6FF") },
+        { "RedButton", Play2UGui.Hex("853F39FF") },
+        { "ActionRow", Play2UGui.Hex("304244FF") },
+        { "HeaderBadge", Play2UGui.Hex("263638FF") },
+        { "SelectedTarget", Play2UGui.Hex("E7D3A6FF") },
+        { "PlayingInput", Play2UGui.Hex("0E191CFF") },
+        { "PlayingSend", Play2UGui.Hex("304244FF") },
+        { "CreamPanel", Play2UGui.Hex("EEE9DFFF") },
+        { "PaperRow", Play2UGui.Hex("DED8CBFF") },
+        { "Keycap", Play2UGui.Hex("E7D3A6FF") }
+    };
 
     internal static void Apply(UnityEngine.UI.Image image, string asset)
     {
+        if (Surfaces.TryGetValue(asset, out var color))
+        {
+            if (rounded == null) rounded = CreateRoundedSurface();
+            image.sprite = rounded;
+            image.type = UnityEngine.UI.Image.Type.Sliced;
+            image.color = color;
+            return;
+        }
         if (!Sprites.TryGetValue(asset, out var sprite))
         {
             sprite = Resources.Load<Sprite>("InGameUI/" + asset);
@@ -21,6 +48,25 @@ internal static class Play2HudArt
             ? UnityEngine.UI.Image.Type.Sliced
             : UnityEngine.UI.Image.Type.Simple;
         image.color = Color.white;
+    }
+
+    private static Sprite CreateRoundedSurface()
+    {
+        const int size = 32;
+        const float radius = 7;
+        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false) { name = "HUD rounded surface" };
+        var pixels = new Color[size * size];
+        for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++)
+        {
+            var point = new Vector2(Mathf.Abs(x + .5f - size / 2f), Mathf.Abs(y + .5f - size / 2f));
+            var corner = Vector2.Max(point - Vector2.one * (size / 2f - radius), Vector2.zero);
+            pixels[y * size + x] = new Color(1, 1, 1, Mathf.Clamp01(radius + .5f - corner.magnitude));
+        }
+        texture.SetPixels(pixels);
+        texture.Apply(false, true);
+        return Sprite.Create(texture, new Rect(0, 0, size, size), new Vector2(.5f, .5f), 100, 0,
+            SpriteMeshType.FullRect, new Vector4(8, 8, 8, 8));
     }
 
     internal static UnityEngine.UI.Image Skin(UnityEngine.UI.Graphic graphic, string asset)
