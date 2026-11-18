@@ -104,9 +104,11 @@ namespace Poker.Application
                     bool pays = action == BettingActionKind.Call || action == BettingActionKind.BetTo || action == BettingActionKind.RaiseTo;
                     if (pays ? entry.amount <= 0 || entry.streetTotal < entry.amount : entry.amount != 0 || entry.allIn) throw Invalid();
                 }
+                if (entry.chipAimSeat != 0 && (kind != HoldemHistoryKind.Action || entry.amount == 0
+                    || entry.chipAimSeat < 1 || entry.chipAimSeat > 4 || entry.chipAimSeat == entry.seat)) throw Invalid();
                 lastStreet = entry.street;
                 var decoded = new HoldemHistoryEntry(kind, (HoldemStreet)entry.street, new SeatId(entry.seat), action,
-                    entry.amount, entry.streetTotal, entry.allIn);
+                    entry.amount, entry.streetTotal, entry.allIn, entry.chipAimSeat);
                 entries.Add(decoded);
                 if (kind == HoldemHistoryKind.Action) lastAction = decoded;
                 if (input.omittedCount == 0)
@@ -137,7 +139,7 @@ namespace Poker.Application
         }
 
         private static bool Same(HoldemHistoryEntry a, HoldemHistoryEntry b) => a.Kind == b.Kind && a.Street == b.Street
-            && a.Seat == b.Seat && a.Action == b.Action && a.Amount == b.Amount && a.StreetTotal == b.StreetTotal && a.IsAllIn == b.IsAllIn;
+            && a.Seat == b.Seat && a.Action == b.Action && a.Amount == b.Amount && a.StreetTotal == b.StreetTotal && a.IsAllIn == b.IsAllIn && a.ChipAimSeat == b.ChipAimSeat;
         private static Guid Id(string value)
         {
             if (value == null || value.Length != 32 || !Guid.TryParseExact(value, "N", out var id) || id == Guid.Empty) throw Invalid();

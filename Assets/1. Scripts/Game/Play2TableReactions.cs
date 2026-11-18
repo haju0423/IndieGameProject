@@ -16,7 +16,9 @@ internal sealed class Play2TableReactions
     private readonly Transform[] eyes;
     private readonly Camera camera;
     private readonly RectTransform menu;
-    private readonly TextMeshProUGUI heading;
+    private readonly TextMeshProUGUI heading, aimLabel;
+    private readonly TextMeshProUGUI aimButtonLabel;
+    internal int AimSeat { get; private set; }
     private readonly Play2TableChips chips;
     private readonly Transform[] heads = new Transform[4];
     private readonly Quaternion[] headRest = new Quaternion[4];
@@ -38,17 +40,24 @@ internal sealed class Play2TableReactions
         this.actors = actors;
         this.eyes = eyes;
         this.camera = camera;
-        menu = Play2HudArt.Plate("Player Reactions", canvas, Vector2.zero, new Vector2(252, 126), "PlayingPanel");
+        menu = Play2HudArt.Plate("Player Reactions", canvas, Vector2.zero, new Vector2(252, 156), "PlayingPanel");
         Play2UGui.Image(Play2UGui.Fill("Pointer Surface", menu), Color.clear, true);
-        heading = Play2UGui.Text("Target", menu, "", new Vector2(-6, 39), new Vector2(215, 28), 18,
+        heading = Play2UGui.Text("Target", menu, "", new Vector2(-6, 56), new Vector2(215, 28), 18,
             Play2UGui.Cream, font, style: FontStyles.Bold);
         heading.richText = false;
         Play2HudArt.Fit(heading, 12);
-        Play2HudArt.Button("Wave", menu, "손 흔들기", new Vector2(-60, -4), new Vector2(109, 36),
+        Play2HudArt.Button("Wave", menu, "손 흔들기", new Vector2(-60, 14), new Vector2(109, 36),
             "PlayingAction", Play2UGui.Cream, font, () => Send(false), 15);
-        Play2HudArt.Button("Finger Gesture", menu, "손가락 욕", new Vector2(60, -4), new Vector2(109, 36),
+        Play2HudArt.Button("Finger Gesture", menu, "손가락 욕", new Vector2(60, 14), new Vector2(109, 36),
             "PlayingAction", Play2UGui.Cream, font, () => Send(true), 15);
-        Play2HudArt.Button("Close Reactions", menu, "닫기", new Vector2(0, -43), new Vector2(82, 24),
+        var aimButton = Play2HudArt.Button("Aim Bet", menu, "칩 던질 상대", new Vector2(0, -25), new Vector2(222, 32),
+            "PlayingAction", Play2UGui.Cream, font, () => { AimSeat = AimSeat == selected ? 0 : selected; Close(); }, 15);
+        aimButtonLabel = aimButton.GetComponentInChildren<TextMeshProUGUI>();
+        aimLabel = Play2UGui.Text("Bet Aim", canvas, "베팅 조준", Vector2.zero, new Vector2(110, 25), 15,
+            Play2UGui.Cream, font, style: FontStyles.Bold);
+        aimLabel.raycastTarget = false;
+        aimLabel.gameObject.SetActive(false);
+        Play2HudArt.Button("Close Reactions", menu, "닫기", new Vector2(0, -59), new Vector2(82, 24),
             "ActionRow", Play2UGui.Cream, font, Close, 13);
         menu.gameObject.SetActive(false);
         for (int i = 0; i < actors.Length; i++)
@@ -65,6 +74,7 @@ internal sealed class Play2TableReactions
         bool newHand = state?.game?.handId != packet?.game?.handId;
         state = packet;
         if (packet?.hasGame != true || packet.hasChat != true) { Close(); return; }
+        if (AimSeat != 0 && !packet.members.Any(m => m.seat == AimSeat && m.connected)) AimSeat = 0;
         if (IsOpen && !packet.members.Any(m => m.seat == selected && m.connected)) Close();
         var entries = packet.chat.entries;
         if (reset || newHand) Release();
@@ -119,6 +129,15 @@ internal sealed class Play2TableReactions
 
     internal void Animate()
     {
+        bool showAim = AimSeat > 0 && state?.game?.hasResult == false && heads[AimSeat - 1] != null;
+        aimLabel.gameObject.SetActive(showAim);
+        if (showAim)
+        {
+            Vector3 point = camera.WorldToScreenPoint(heads[AimSeat - 1].position + Vector3.up * .17f);
+            RectTransformUtility.ScreenPointToLocalPointInRectangle((RectTransform)menu.parent, point, null, out var local);
+            aimLabel.rectTransform.anchoredPosition = local;
+            aimLabel.enabled = point.z > 0;
+        }
         for (int i = 0; i < actors.Length; i++)
         {
             float elapsed = Time.time - started[i];
@@ -181,10 +200,11 @@ internal sealed class Play2TableReactions
         if (nearest < 0) return wasOpen;
         selected = nearest + 1;
         heading.text = Name(state, selected) + "에게";
+        aimButtonLabel.text = selected == AimSeat ? "조준 해제" : "칩 던질 상대";
         RectTransformUtility.ScreenPointToLocalPointInRectangle((RectTransform)menu.parent, point, null, out var local);
         var area = ((RectTransform)menu.parent).rect;
         menu.anchoredPosition = new Vector2(Mathf.Clamp(local.x, area.xMin + 132, area.xMax - 132),
-            Mathf.Clamp(local.y - 68, area.yMin + 70, area.yMax - 70));
+            Mathf.Clamp(local.y - 82, area.yMin + 80, area.yMax - 80));
         menu.gameObject.SetActive(true);
         return true;
     }
@@ -221,8 +241,11 @@ internal sealed class Play2TableReactions
         return target >= 1 && target <= 4 && (finger || kind == 'W');
     }
 
+    internal void ClearAim() => AimSeat = 0;
+
     internal void Release()
     {
+        ClearAim();
         Close();
         for (int i = 0; i < actors.Length; i++)
         {

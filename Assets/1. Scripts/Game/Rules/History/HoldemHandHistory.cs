@@ -15,8 +15,8 @@ namespace Poker.Application
     public sealed class HoldemHistoryEntry
     {
         internal HoldemHistoryEntry(HoldemHistoryKind kind, HoldemStreet street, SeatId seat,
-            BettingActionKind? action, long amount, long streetTotal, bool allIn)
-        { Kind = kind; Street = street; Seat = seat; Action = action; Amount = amount; StreetTotal = streetTotal; IsAllIn = allIn; }
+            BettingActionKind? action, long amount, long streetTotal, bool allIn, int chipAimSeat = 0)
+        { Kind = kind; Street = street; Seat = seat; Action = action; Amount = amount; StreetTotal = streetTotal; IsAllIn = allIn; ChipAimSeat = chipAimSeat; }
         public HoldemHistoryKind Kind { get; }
         public HoldemStreet Street { get; }
         public SeatId Seat { get; }
@@ -24,6 +24,7 @@ namespace Poker.Application
         public long Amount { get; }
         public long StreetTotal { get; }
         public bool IsAllIn { get; }
+        public int ChipAimSeat { get; }
     }
 
     /// <summary>Immutable copy of the current hand's history, safe to retain while play continues.</summary>

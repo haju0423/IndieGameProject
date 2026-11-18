@@ -297,7 +297,7 @@ namespace Poker.Transport
                             break;
                         case "act":
                             result = room.Submit(senderConnection, new HoldemRoomAction(sessionId, hand, id,
-                                request.version, Action(request)));
+                                request.version, Action(request), request.chipAimSeat));
                             break;
                         case "start":
                             result = room.StartHand(senderConnection,

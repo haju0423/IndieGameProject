@@ -10,9 +10,28 @@ internal sealed class Play2TableChips : MonoBehaviour
     private readonly Transform[] pile = new Transform[18];
     private readonly Transform[] moving = new Transform[4];
     private readonly Play2BettingHand[] hands = new Play2BettingHand[4];
-    private readonly Queue<int> bets = new();
+    private readonly Queue<HoldemHistoryEntryPacket> bets = new();
+    private readonly Transform[] allInStack = new Transform[6];
+    private readonly Transform[] heads = new Transform[4];
+    private HoldemHistoryEntryPacket action;
+    private bool struck;
+    private Quaternion beforeFlinch;
+    private Transform flinching;
+    private Vector3 hitPoint, dropPoint, pushStart, pushStop, pushSide;
+    internal float PushTime(int index) => activeSeat == index && action?.allIn == true ? Time.time - began : -1;
+    internal bool WaitToStand(int index)
+    {
+        if (action?.allIn == true && activeSeat == index) return true;
+        foreach (var bet in bets) if (bet.seat == index + 1 && bet.allIn) return true;
+        return false;
+    }
     internal bool IsAnimating => activeSeat >= 0 || bets.Count > 0;
-    internal bool IsBetting(int index) => activeSeat == index || bets.Contains(index);
+    internal bool IsBetting(int index)
+    {
+        if (activeSeat == index) return true;
+        foreach (var bet in bets) if (bet.seat == index + 1) return true;
+        return false;
+    }
     internal Play2BettingHand FreeHand(int index) => hands[index] ??=
         new Play2BettingHand(players[index], index + 1 == viewer ? viewCamera : null);
     internal void RestHand(int index) => hands[index]?.Rest();
@@ -22,72 +41,65 @@ internal sealed class Play2TableChips : MonoBehaviour
     private Transform viewCamera;
     private Play2TableAudio sound;
     private Material material;
-    private int viewer, activeSeat = -1, targetCount;
+    private Mesh chipMesh;
+    private int viewer, activeSeat = -1, targetCount, shownCount;
     private float began;
     private bool landed;
-    private Vector3 flightStart, flightEnd;
+    private Vector3 flightStart, flightEnd, touchDown;
+    private float releaseYaw, landingYaw;
 
     public void Initialize(Transform[] seatEyes, Material chipMaterial, GameObject[] actors,
         Transform view, Play2TableAudio audio)
     {
         eyes = seatEyes;
         material = chipMaterial;
+        tint = new MaterialPropertyBlock();
+        chipMesh = Resources.Load<Mesh>("TablePresentation/PokerChip");
         players = actors;
         viewCamera = view;
         sound = audio;
         for (int i = 0; i < pile.Length; i++)
         {
-            pile[i] = MakeChip("Pot chip", i / 6 == 1 ? Play2UGui.Hex("405D71") : Play2UGui.Hex("C05C42"));
+            pile[i] = MakeChip("Pot chip", StackColor(i));
             pile[i].localPosition = StackPosition(i);
+            pile[i].localRotation = Quaternion.Euler(0, StackYaw(i), 0);
         }
         for (int i = 0; i < moving.Length; i++)
-            moving[i] = MakeChip("Bet from seat " + (i + 1), Play2UGui.Hex("C05C42"));
+        {
+            moving[i] = MakeChip("Bet from seat " + (i + 1), StackColor(0));
+            heads[i] = actors[i].GetComponent<Animator>().GetBoneTransform(HumanBodyBones.Head);
+        }
+        for (int i = 0; i < allInStack.Length; i++)
+            allInStack[i] = MakeChip("All-in chip " + (i + 1), StackColor(i < 3 ? 0 : 6));
     }
 
     private static Vector3 StackPosition(int i) => PotPosition
-        + new Vector3((i / 6) * .071f, (i % 6) * .008f, (i / 6 == 1 ? -.025f : 0));
+        + new Vector3((i / 6) * .071f, (i % 6) * .0062f, (i / 6 == 1 ? -.025f : 0));
+
+    private static Color StackColor(int index) => index / 6 == 1 ? Play2UGui.Hex("405D71") : Play2UGui.Hex("AE5042");
+    private static float StackYaw(int index) => (index * 47 + 9) % 360;
 
     private Transform MakeChip(string label, Color color)
     {
         var chip = new GameObject(label).transform;
         chip.SetParent(transform, false);
-        Disc(chip, "Edge", 0, .062f, .0035f, color);
-        Disc(chip, "Ivory inset", .0036f, .047f, .0005f, Play2UGui.Cream);
-        Disc(chip, "Face", .0044f, .036f, .0004f, color);
-        for (int i = 0; i < 6; i++)
-        {
-            float angle = i * Mathf.PI / 3;
-            var marker = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            Destroy(marker.GetComponent<Collider>());
-            marker.name = "Edge inlay";
-            marker.transform.SetParent(chip, false);
-            marker.transform.localPosition = new Vector3(Mathf.Sin(angle) * .026f, .0038f, Mathf.Cos(angle) * .026f);
-            marker.transform.localScale = new Vector3(.006f, .0008f, .009f);
-            marker.transform.localRotation = Quaternion.Euler(0, i * 60, 0);
-            Tint(marker.GetComponent<Renderer>(), Play2UGui.Cream);
-        }
+        chip.gameObject.AddComponent<MeshFilter>().sharedMesh = chipMesh;
+        var renderer = chip.gameObject.AddComponent<MeshRenderer>();
+        renderer.sharedMaterials = new[] { material, material };
+        Tint(renderer, 0, color);
+        Tint(renderer, 1, Play2UGui.Cream);
         chip.gameObject.SetActive(false);
         return chip;
     }
 
-    private void Disc(Transform chip, string label, float y, float size, float height, Color color)
-    {
-        var disc = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        disc.name = label;
-        Destroy(disc.GetComponent<Collider>());
-        disc.transform.SetParent(chip, false);
-        disc.transform.localScale = new Vector3(size, height, size);
-        disc.transform.localPosition = Vector3.up * y;
-        Tint(disc.GetComponent<Renderer>(), color);
-    }
+    private MaterialPropertyBlock tint;
 
-    private void Tint(Renderer renderer, Color color)
+    private void Tint(Renderer renderer, int slot, Color color)
     {
-        var tint = new MaterialPropertyBlock();
         tint.SetColor("_BaseColor", color);
-        tint.SetColor("_Color", color);
-        renderer.sharedMaterial = material;
-        renderer.SetPropertyBlock(tint);
+        tint.SetFloat("_Smoothness", .24f);
+        tint.SetFloat("_Metallic", 0);
+        renderer.SetPropertyBlock(tint, slot);
     }
 
     public void Present(HoldemRoomPacket previous, HoldemRoomPacket next)
@@ -116,7 +128,7 @@ internal sealed class Play2TableChips : MonoBehaviour
             if (!entry.hasAction || entry.amount <= 0) continue;
             if (entry.action == (int)BettingActionKind.Call || entry.action == (int)BettingActionKind.BetTo
                 || entry.action == (int)BettingActionKind.RaiseTo)
-                bets.Enqueue(entry.seat - 1);
+                bets.Enqueue(entry);
         }
         if (activeSeat < 0 && bets.Count == 0) ShowPile(targetCount);
     }
@@ -129,39 +141,61 @@ internal sealed class Play2TableChips : MonoBehaviour
         int index = activeSeat;
         float time = Time.time - began;
         var chip = moving[index];
+        if (action.allIn)
+        {
+            AnimatePush(time);
+            if (time >= .96f) FinishBet();
+            return;
+        }
         hands[index].Pose(time);
         if (time < .26f)
         {
             chip.position = hands[index].Contact;
-            chip.rotation = Quaternion.Euler(0, eyes[index].eulerAngles.y, 0);
+            chip.localRotation = Quaternion.Euler(0, releaseYaw, 0);
             flightStart = chip.localPosition;
+        }
+        else if (action.chipAimSeat > 0)
+        {
+            AnimateTargeted(chip, time);
+            if (time < 1.28f) return;
         }
         else
         {
-            float t = Mathf.Clamp01((time - .26f) / .34f);
-            chip.localPosition = Vector3.Lerp(flightStart, flightEnd, t)
-                + Vector3.up * (.11f * 4f * t * (1 - t));
-            chip.localRotation = Quaternion.Euler(18f * Mathf.Sin(t * Mathf.PI), 230f * t, 0);
+            float t = Mathf.Clamp01((time - .26f) / .28f);
+            chip.localPosition = Vector3.Lerp(flightStart, touchDown, t)
+                + Vector3.up * (.043f * 4f * t * (1 - t));
+            chip.localRotation = Quaternion.Euler(10f * Mathf.Sin(t * Mathf.PI),
+                Mathf.LerpAngle(releaseYaw, landingYaw - 12f, t), 0);
             if (t >= 1)
             {
                 if (!landed) { landed = true; sound.ChipLand(); }
-                float bounce = Mathf.Clamp01((time - .60f) / .16f);
-                chip.localPosition = flightEnd + Vector3.up * (.015f * Mathf.Sin(bounce * Mathf.PI));
-                chip.localRotation = Quaternion.Euler(7f * Mathf.Sin(bounce * Mathf.PI * 2) * (1 - bounce), 230, 0);
+                float settle = Mathf.Clamp01((time - .54f) / .13f);
+                float slide = 1f - (1f - settle) * (1f - settle);
+                chip.localPosition = Vector3.Lerp(touchDown, flightEnd, slide);
+                chip.localRotation = Quaternion.Euler(3f * Mathf.Sin(settle * 2f * Mathf.PI) * (1f - settle),
+                    landingYaw - 12f * (1f - slide), 0);
             }
         }
         if (time < .76f) return;
-        chip.gameObject.SetActive(false);
-        hands[index].Rest();
+        FinishBet();
+    }
+
+    private void FinishBet()
+    {
+        moving[activeSeat].gameObject.SetActive(false);
+        if (action.allIn)
+            foreach (var token in allInStack) token.gameObject.SetActive(false);
+        hands[activeSeat].Rest();
         activeSeat = -1;
         ShowPile(targetCount);
     }
 
     private void StartBet()
     {
-        activeSeat = bets.Dequeue();
+        action = bets.Dequeue();
+        activeSeat = action.seat - 1;
         began = Time.time;
-        landed = false;
+        landed = struck = false;
         FreeHand(activeSeat);
         Vector3 seat = transform.InverseTransformPoint(eyes[activeSeat].position);
         Vector3 outward = new Vector3(seat.x, 0, seat.z).normalized;
@@ -171,17 +205,120 @@ internal sealed class Play2TableChips : MonoBehaviour
         var start = outward * .54f + side * .15f + Vector3.up * .08f;
         var release = outward * .40f + side * .11f + Vector3.up * .11f;
         hands[activeSeat].Begin(transform.TransformPoint(start), transform.TransformPoint(release));
-        flightEnd = StackPosition(Mathf.Max(0, targetCount - 1));
-        moving[activeSeat].gameObject.SetActive(true);
+        int landingSlot = Mathf.Max(0, targetCount - 1);
+        flightEnd = StackPosition(landingSlot);
+        // On felt a chip can slide farther than on the rim of a stack.
+        touchDown = Vector3.MoveTowards(flightEnd, new Vector3(release.x, flightEnd.y, release.z),
+            landingSlot % 6 == 0 ? .028f : .006f);
+        Vector3 forward = transform.InverseTransformDirection(eyes[activeSeat].forward);
+        releaseYaw = Mathf.Atan2(forward.x, forward.z) * Mathf.Rad2Deg;
+        landingYaw = StackYaw(landingSlot);
+        Tint(moving[activeSeat].GetComponent<Renderer>(), 0, StackColor(landingSlot));
+        if (shownCount > landingSlot) ShowPile(landingSlot);
+        if (action.allIn)
+        {
+            pushSide = side;
+            pushStart = outward * .54f + Vector3.up * PotPosition.y;
+            pushStop = Vector3.Lerp(pushStart, flightEnd, .62f);
+            hands[activeSeat].Begin(transform.TransformPoint(pushStart), transform.TransformPoint(pushStop));
+            foreach (var token in allInStack) token.gameObject.SetActive(true);
+        }
+        else moving[activeSeat].gameObject.SetActive(true);
+    }
+
+    // The same wager chip strikes the chosen seat, loses height, then is raked into the pot.
+    private void AnimateTargeted(Transform chip, float time)
+    {
+        int target = action.chipAimSeat - 1;
+        if (!struck)
+        {
+            var head = heads[target];
+            Vector3 face = transform.InverseTransformPoint(head.position);
+            Vector3 inward = Vector3.ProjectOnPlane(-face, Vector3.up).normalized;
+            hitPoint = face + inward * .082f + Vector3.up * .068f;
+            if (target + 1 == viewer)
+                hitPoint = transform.InverseTransformPoint(viewCamera.TransformPoint(new Vector3(.085f, -.055f, .22f)));
+            dropPoint = Vector3.ProjectOnPlane(face, Vector3.up).normalized * .48f + Vector3.up * PotPosition.y;
+        }
+        float approach = Mathf.Clamp01((time - .26f) / .31f);
+        if (approach < 1)
+        {
+            chip.localPosition = Vector3.Lerp(flightStart, hitPoint, approach)
+                + Vector3.up * (.075f * 4f * approach * (1f - approach));
+            chip.localRotation = Quaternion.Euler(42f * approach, releaseYaw + 150f * approach, 12f * approach);
+            return;
+        }
+        struck = true;
+        float rebound = Mathf.Clamp01((time - .57f) / .29f);
+        float slide = Mathf.SmoothStep(0, 1, Mathf.Clamp01((time - .97f) / .31f));
+        Vector3 afterHit = Vector3.Lerp(hitPoint, dropPoint, rebound);
+        afterHit.y = Mathf.Lerp(hitPoint.y, dropPoint.y, rebound * rebound);
+        float bounce = Mathf.Clamp01((time - .86f) / .11f);
+        chip.localPosition = Vector3.Lerp(afterHit, flightEnd, slide)
+            + Vector3.up * (.012f * 4f * bounce * (1f - bounce));
+        chip.localRotation = Quaternion.Euler(42f * (1f - rebound) + 5f * Mathf.Sin(bounce * Mathf.PI),
+            Mathf.LerpAngle(releaseYaw + 150f, landingYaw, (rebound + slide) * .5f), 0);
+        if (!landed && rebound >= 1) { sound.ChipLand(); landed = true; }
+        float kick = Mathf.Clamp01((time - .57f) / .32f);
+        float weight = Mathf.Sin(kick * Mathf.PI) * (1f - kick);
+        if (weight <= .001f) return;
+        if (target + 1 == viewer)
+        {
+            flinching = viewCamera;
+            beforeFlinch = flinching.localRotation;
+            flinching.localRotation *= Quaternion.Euler(-2f * weight, 0, 2f * weight);
+        }
+        else
+        {
+            flinching = heads[target];
+            beforeFlinch = flinching.localRotation;
+            float sign = Vector3.Dot(eyes[target].right, eyes[activeSeat].position - eyes[target].position) < 0 ? -1f : 1f;
+            flinching.localRotation *= Quaternion.Euler(-15f * weight, -6f * sign * weight, 8f * sign * weight);
+        }
+    }
+
+    internal void RestoreFlinch()
+    {
+        if (flinching == null) return;
+        flinching.localRotation = beforeFlinch;
+        flinching = null;
+    }
+
+    internal Vector3 PushPalm(float time, bool cardHand)
+    {
+        float forward = Mathf.SmoothStep(0, 1, Mathf.Clamp01((time - .21f) / .40f));
+        Vector3 center = Vector3.Lerp(pushStart, pushStop, forward);
+        Vector3 outward = Vector3.ProjectOnPlane(pushStart, Vector3.up).normalized;
+        return transform.TransformPoint(center + pushSide * (cardHand ? -.083f : .083f)
+            + outward * .032f + Vector3.up * .019f);
+    }
+
+    private void AnimatePush(float time)
+    {
+        float progress = Mathf.SmoothStep(0, 1, Mathf.Clamp01((time - .21f) / .40f));
+        float rake = Mathf.SmoothStep(0, 1, Mathf.Clamp01((time - .63f) / .33f));
+        Vector3 center = Vector3.Lerp(Vector3.Lerp(pushStart, pushStop, progress), new Vector3(flightEnd.x, PotPosition.y, flightEnd.z), rake);
+        for (int i = 0; i < allInStack.Length; i++)
+        {
+            var token = allInStack[i];
+            token.localPosition = center + pushSide * (i < 3 ? -.034f : .034f)
+                + Vector3.up * (i % 3 * .0062f);
+            token.localRotation = Quaternion.Euler(0, StackYaw(i), 0);
+        }
+        hands[activeSeat].Push(PushPalm(time, false), time);
+        if (!landed && progress >= 1) { sound.ChipLand(); landed = true; }
     }
 
     private void ShowPile(int count)
     {
+        shownCount = count;
         for (int i = 0; i < pile.Length; i++) pile[i].gameObject.SetActive(i < count);
     }
 
     private void ResetHands()
     {
+        RestoreFlinch();
+        foreach (var token in allInStack) if (token != null) token.gameObject.SetActive(false);
         bets.Clear();
         activeSeat = -1;
         for (int i = 0; i < hands.Length; i++)

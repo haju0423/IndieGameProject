@@ -52,9 +52,9 @@ internal sealed class Play2AllInPosture
         modified = false;
     }
 
-    internal void Animate(bool firstPerson)
+    internal void Animate(bool firstPerson, bool pushing = false)
     {
-        progress = Mathf.MoveTowards(progress, AllIn ? 1f : 0f, Time.deltaTime / .68f);
+        progress = Mathf.MoveTowards(progress, AllIn && !pushing ? 1f : 0f, Time.deltaTime / .68f);
         Rise = 0f;
         if (progress <= 0f || firstPerson || !hips.gameObject.activeInHierarchy) return;
         Vector3 feetBefore = (leftFoot.position + rightFoot.position) * .5f;

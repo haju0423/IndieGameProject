@@ -68,11 +68,25 @@ internal sealed class Play2BettingHand
         point += Vector3.up * (.012f * Mathf.Sin(Mathf.Clamp01(time / .26f) * Mathf.PI));
         Quaternion rotation = facing * Quaternion.Euler(-9f * forward * (1 - retreat), 0, 0)
             * Quaternion.Inverse(contact.rotation);
-        fingers.SetCardGrip(left, 1 - open);
+        PlacePalm(point, rotation, 1f - open);
+    }
+
+    internal void Push(Vector3 point, float time)
+    {
+        float approach = Mathf.SmoothStep(0, 1, Mathf.Clamp01(time / .18f));
+        float withdraw = Mathf.SmoothStep(0, 1, Mathf.Clamp01((time - .64f) / .24f));
+        point = Vector3.Lerp(start - facing * Vector3.forward * .06f, point, approach);
+        point = Vector3.Lerp(point, start - facing * Vector3.forward * .07f - Vector3.up * .04f, withdraw);
+        PlacePalm(point, fingers.PointingRotation(left, facing * Vector3.forward), .15f, true);
+    }
+
+    private void PlacePalm(Vector3 point, Quaternion rotation, float curl, bool push = false)
+    {
+        fingers.SetCardGrip(left, curl);
         Vector3 target = point - rotation * Vector3.Scale(contact.position, wrist.lossyScale);
         if (camera != null)
         {
-            PlaceViewArm(target, rotation);
+            PlaceViewArm(target, rotation, push, push);
         }
         else
         {
@@ -163,13 +177,13 @@ internal sealed class Play2BettingHand
         }
     }
 
-    private void PlaceViewArm(Vector3 target, Quaternion rotation, bool fromSide = false)
+    private void PlaceViewArm(Vector3 target, Quaternion rotation, bool fromSide = false, bool alignSleeve = false)
     {
         Vector3 elbow = fromSide ? new Vector3(.48f, -.43f, .22f) : new Vector3(.28f, -.48f, .12f);
         Quaternion neutralForearm = rotation * Quaternion.Inverse(wristRest);
         Vector3 neutralDirection = neutralForearm * wrist.localPosition.normalized;
         Vector3 towardHand = target - camera.TransformPoint(elbow);
-        Vector3 armDirection = Vector3.RotateTowards(neutralDirection, towardHand.normalized, 40f * Mathf.Deg2Rad, 0f);
+        Vector3 armDirection = alignSleeve ? towardHand.normalized : Vector3.RotateTowards(neutralDirection, towardHand.normalized, 40f * Mathf.Deg2Rad, 0f);
         Quaternion armRotation = Quaternion.FromToRotation(neutralDirection, armDirection) * neutralForearm;
         Transform body = viewModel.transform;
         body.rotation = armRotation * Quaternion.Inverse(lower.rotation) * body.rotation;

@@ -70,7 +70,7 @@ public sealed class Play2TablePreview : MonoBehaviour
         {
             for (int i = 0; i < postures.Length; i++)
             {
-                postures[i].Animate(i + 1 == viewer);
+                postures[i].Animate(i + 1 == viewer, chips.WaitToStand(i));
                 if (i + 1 != viewer) standFraming = Mathf.Max(standFraming, postures[i].Weight);
             }
             var eye = eyes[viewer - 1];
@@ -82,7 +82,11 @@ public sealed class Play2TablePreview : MonoBehaviour
         float aspect = Mathf.Min(seatCamera.aspect, 16f / 9f);
         seatCamera.fieldOfView = Camera.HorizontalToVerticalFieldOfView(
             Camera.VerticalToHorizontalFieldOfView(65f + standFraming * 4f, 16f / 9f), aspect);
-        for (int i = 0; i < grips.Length; i++) grips[i]?.UpdatePose(postures[i].Rise);
+        for (int i = 0; i < grips.Length; i++)
+        {
+            float push = chips.PushTime(i);
+            grips[i]?.UpdatePose(postures[i].Rise, push, push >= 0f ? chips.PushPalm(push, true) : default);
+        }
         if (Showdown is ShowdownBeat.Award or ShowdownBeat.Finished) LiftWinningCards();
         reactions?.Animate();
         chips?.UpdateHands();
@@ -146,6 +150,7 @@ public sealed class Play2TablePreview : MonoBehaviour
     private void Update()
     {
         if (session == null) return;
+        chips?.RestoreFlinch();
         foreach (var pose in postures) pose?.Restore();
         SetState(session.State);
         AdvanceShowdown();
@@ -160,7 +165,13 @@ public sealed class Play2TablePreview : MonoBehaviour
             grips[viewer - 1].Inspect(!grips[viewer - 1].IsInspecting);
     }
 
-    internal bool Submit(HoldemWireRequest request) => session != null && session.Submit(request);
+    internal bool Submit(HoldemWireRequest request)
+    {
+        if (request.type == "act") request.chipAimSeat = reactions?.AimSeat ?? 0;
+        if (session == null || !session.Submit(request)) return false;
+        if (request.type == "act") reactions?.ClearAim();
+        return true;
+    }
     internal void StartHand() => session?.StartHand();
     internal void ToggleRematchReady() => session?.ToggleRematchReady();
     internal void RestartMatch() => session?.RestartMatch();
@@ -239,7 +250,7 @@ public sealed class Play2TablePreview : MonoBehaviour
             CardVisual secondCard = CreateHoleCard(showFaces, showFaces ? seat.visibleCards[1] : 0);
             grips[player] = new Play2CardGrip(players[player], own ? seatCamera.transform : null,
                 tabletop, eyes[player], DealOrigin, firstCard, secondCard, delay, gap,
-                showFaces && game.board.Length == 0 && !game.hasResult);
+                showFaces && game.board.Length == 0 && !game.hasResult, tableAudio.CardSlide);
             if (folded) grips[player].Fold();
             else if (revealed) grips[player].Reveal(seat.visibleCards[0], seat.visibleCards[1]);
             else animationUntil = Mathf.Max(animationUntil, Time.time + delay + Play2CardGrip.Duration(gap));
