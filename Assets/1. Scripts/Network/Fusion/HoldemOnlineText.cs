@@ -12,7 +12,7 @@ namespace Poker.Online
         {
             switch (reason)
             {
-                case "GameIsFull": case "Full":
+                case "GameIsFull": case "ServerFull": case "Full":
                     return "방이 꽉 찼어요. 빈자리가 생긴 뒤 참가하거나 다른 코드를 입력해 주세요.";
                 case "GameNotFound": case "NoMatchFound":
                     return "방을 찾지 못했어요. 방 코드와 방장이 접속 중인지 확인해 주세요.";

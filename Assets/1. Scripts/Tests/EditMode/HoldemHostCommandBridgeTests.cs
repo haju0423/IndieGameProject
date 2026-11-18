@@ -101,6 +101,36 @@ namespace Poker.Foundation.Tests
             Assert.That(after.game.seats[0].visibleCards, Is.Empty);
         }
 
+        [TestCase("other"), TestCase("self"), TestCase("absent"), TestCase("all-in")]
+        public void OnlyAcceptedPaidActionsCarryACosmeticThrowToEveryViewer(string aim)
+        {
+            CreateRoom(4);
+            for (int i = 0; i < 4; i++) Ready(i);
+            var start = Request(identities[0], "start");
+            start.handId = Guid.NewGuid().ToString("N");
+            AssertAccepted(bridge.Dispatch(connections[0], start));
+            Assert.That(bridge.TryCreateProjection(connections[0], out var room), Is.True);
+            int actor = room.game.currentSeat;
+            int other = actor % 4 + 1;
+            Assert.That(bridge.TryCreateProjection(connections[actor - 1], out var own), Is.True);
+            var bet = Request(identities[actor - 1], "act");
+            bet.handId = own.game.handId;
+            bet.version = own.game.version;
+            bet.action = aim == "all-in" ? (int)BettingActionKind.RaiseTo : (int)BettingActionKind.Call;
+            bet.target = aim == "all-in" ? own.game.legal.maximumTarget : 0;
+            bet.chipAimSeat = aim == "self" ? actor : aim == "absent" ? 9 : other;
+            AssertAccepted(bridge.Dispatch(connections[actor - 1], bet));
+            for (int i = 0; i < 4; i++)
+            {
+                Assert.That(bridge.TryCreateProjection(connections[i], out var view), Is.True);
+                var history = HoldemHistoryPacketReader.Read(view);
+                var entry = history.GetEntry(history.Count - 1);
+                Assert.That(entry.Seat.Value, Is.EqualTo(actor));
+                Assert.That(entry.ChipAimSeat, Is.EqualTo(aim == "other" ? other : 0));
+                Assert.That(view.game.pot, Is.EqualTo(own.game.pot + entry.Amount));
+            }
+        }
+
         [TestCase(2), TestCase(3), TestCase(4)]
         public void BoardPreviewDealsOnlyOneStreetAndKeepsHoleCardsPrivate(int capacity)
         {

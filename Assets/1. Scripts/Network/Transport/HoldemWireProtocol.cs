@@ -14,6 +14,7 @@ namespace Poker.Transport
         public string designatedMessageId;
         public long version, target;
         public int action, street, oddChipRule;
+        public int chipAimSeat; // Optional visual target; zero sends the wager to the pot.
         public bool ready;
         // Compatibility declaration, not an authority or identity claim.
         public bool supportsThreePlayerRooms;

@@ -205,8 +205,10 @@ namespace Poker.Application
                             ? input.Action.Target - before.OwnStreetContribution : 0;
                     lastAction = new HoldemActionNotice(member.Seat, input.Action, paid, before.Street);
                     seatActions[member.Seat.Value - 1] = lastAction;
+                    int aim = paid > 0 && paid < before.OwnStack && input.ChipAimSeat != member.Seat.Value
+                        && members.Exists(m => m.Connected && m.Seat.Value == input.ChipAimSeat) ? input.ChipAimSeat : 0;
                     AppendHistory(new HoldemHistoryEntry(HoldemHistoryKind.Action, before.Street, member.Seat,
-                        input.Action.Kind, paid, before.OwnStreetContribution + paid, paid > 0 && paid == before.OwnStack));
+                        input.Action.Kind, paid, before.OwnStreetContribution + paid, paid > 0 && paid == before.OwnStack, aim));
                     RecordHistoryReturns(before, session.GetSnapshot(member.Seat), member.Seat, paid);
                     SynchronizeUtterances();
                     revision++;

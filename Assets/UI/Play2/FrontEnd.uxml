@@ -5,7 +5,7 @@
             <ui:VisualElement class="lobby-top">
                 <ui:Button name="leave" text="← 방 나가기" class="action quiet" />
                 <ui:VisualElement class="lobby-heading">
-                    <ui:Label text="ONE MORE CARD" class="eyebrow" />
+                    <ui:VisualElement class="lobby-logo" tooltip="One More Card" picking-mode="Ignore" />
                     <ui:Label name="room-label" class="heading" />
                 </ui:VisualElement>
                 <ui:Button name="copy" text="방 코드 복사" class="action quiet" />

@@ -138,7 +138,7 @@ internal static class Play2UGui
         Color background, Color foreground, TMP_FontAsset font, UnityAction action, float fontSize = 20)
     {
         var rect = Panel(name, parent, position, size, background, true);
-        var button = rect.gameObject.AddComponent<UnityEngine.UI.Button>();
+        var button = rect.gameObject.AddComponent<Play2ActionButton>();
         button.targetGraphic = rect.GetComponent<UnityEngine.UI.Image>();
         var colors = button.colors;
         colors.highlightedColor = new Color(1.08f, 1.08f, 1.08f, 1);

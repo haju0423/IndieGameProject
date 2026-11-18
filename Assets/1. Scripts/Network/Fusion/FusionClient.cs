@@ -57,6 +57,7 @@ namespace Poker.Online
         private CryptographicRandomSource random;
         private HoldemWireRequest admission;
         private bool hosting, started, closed, admitted, admissionSent;
+        private bool endingRoom;
         private int sent;
         private double connectedAt, retryAt = -1;
         private string connectionToken;
@@ -149,8 +150,8 @@ namespace Poker.Online
                     ConnectionToken = Utf8.GetBytes(connectionToken)
                 });
                 var result = await startupTask;
-                if (closed) { await Shutdown(); return false; }
                 if (!result.Ok) { RecordConnectionError(result.ShutdownReason.ToString()); Dispose(); return false; }
+                if (closed) { await Shutdown(); return false; }
                 if (host && llmDealer)
                 {
                     if (hostAnalyzer != null && !hostAnalyzer.gameObject.activeSelf)
@@ -283,6 +284,12 @@ namespace Poker.Online
         {
             if (response == null || response.protocol != HoldemRoomPacketMapper.ProtocolVersion)
             { RecordConnectionError("InvalidServerReply"); Dispose(); return; }
+            if (!hosting && response.type == "host-ended")
+            {
+                RecordConnectionError("HostEnded");
+                Dispose();
+                return;
+            }
             if (response.type == "admitted")
             {
                 if (!Identity.TryConfirmAdmission(response, admission.id)) { RecordConnectionError("InvalidAdmissionReply"); Dispose(); return; }
@@ -395,6 +402,28 @@ namespace Poker.Online
             if (source == runner && hosting && peers.TryGetValue(player, out var peer))
             { authority?.Disconnect(peer.Connection); peers.Remove(player); }
         }
+        // Only an intentional host exit is announced. A lost connection can still be retried.
+        public async Task EndHostedRoom()
+        {
+            try
+            {
+                if (!hosting || !started || closed || runner == null || !runner.IsRunning) return;
+                endingRoom = true;
+                runner.SessionInfo.IsOpen = false;
+                var ending = new HoldemWireResponse { protocol = HoldemRoomPacketMapper.ProtocolVersion, type = "host-ended" };
+                foreach (var entry in new List<KeyValuePair<PlayerRef, Peer>>(peers))
+                    if (entry.Key != runner.LocalPlayer)
+                        SendReplies(entry.Key, entry.Value, ending);
+
+                // Updated guests leave as soon as they receive the notice. Don't wait indefinitely
+                // for a disconnected peer or an older build that ignores it.
+                double deadline = Time.realtimeSinceStartupAsDouble + 3;
+                while (!closed && peers.Count > 1 && Time.realtimeSinceStartupAsDouble < deadline)
+                    await Task.Delay(40);
+            }
+            finally { await Shutdown(); }
+        }
+
         public void Dispose() { _ = Shutdown(); }
         public Task Shutdown() => shutdownTask ?? (shutdownTask = ShutdownCore());
         private async Task ShutdownCore()
@@ -447,7 +476,7 @@ namespace Poker.Online
         {
             if (source == runner && !closed && hosting && authority != null && !HoldemFusionIngress.TryReadToken(token, out _))
             { Debug.LogWarning("OMC_FUSION_PACKET_REJECT connection-token"); request.Refuse(); return; }
-            if (source == runner && !closed && hosting && authority != null && peers.Count < authority.SeatCapacity) request.Accept();
+            if (source == runner && !closed && !endingRoom && hosting && authority != null && peers.Count < authority.SeatCapacity) request.Accept();
             else request.Refuse();
         }
         public void OnHostMigration(NetworkRunner source, HostMigrationToken token)

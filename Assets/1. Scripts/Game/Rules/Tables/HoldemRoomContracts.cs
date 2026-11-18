@@ -130,19 +130,21 @@ namespace Poker.Application
     /// <summary>No claimed seat: the server resolves the transport connection before constructing a core command.</summary>
     public sealed class HoldemRoomAction
     {
-        public HoldemRoomAction(Guid sessionId, Guid handId, Guid commandId, long expectedVersion, BettingAction action)
+        public HoldemRoomAction(Guid sessionId, Guid handId, Guid commandId, long expectedVersion, BettingAction action, int chipAimSeat = 0)
         {
             if (sessionId == Guid.Empty || handId == Guid.Empty || commandId == Guid.Empty)
                 throw new ArgumentException("Session, hand and command IDs are required.");
             if (expectedVersion < 0) throw new ArgumentOutOfRangeException(nameof(expectedVersion));
             SessionId = sessionId; HandId = handId; CommandId = commandId;
             ExpectedVersion = expectedVersion; Action = action ?? throw new ArgumentNullException(nameof(action));
+            ChipAimSeat = chipAimSeat;
         }
         public Guid SessionId { get; }
         public Guid HandId { get; }
         public Guid CommandId { get; }
         public long ExpectedVersion { get; }
         public BettingAction Action { get; }
+        public int ChipAimSeat { get; }
     }
 
     public sealed class HoldemRoomMemberView

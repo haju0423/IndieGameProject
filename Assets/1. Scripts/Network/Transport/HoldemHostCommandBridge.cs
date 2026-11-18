@@ -297,7 +297,7 @@ namespace Poker.Transport
                             break;
                         case "act":
                             result = room.Submit(senderConnection, new HoldemRoomAction(sessionId, hand, id,
-                                request.version, Action(request)));
+                                request.version, Action(request), request.chipAimSeat));
                             break;
                         case "start":
                             result = room.StartHand(senderConnection,
@@ -362,6 +362,21 @@ namespace Poker.Transport
                     if (!receipt.Accepted) return false;
                 }
                 return room.Read(HostConnection).Game.Street != initial.Street;
+            }
+        }
+
+        // Used only by the local practice table. Each opponent receives its own private view.
+        public bool TryPlayPracticeOpponent(Guid connection, HoldemNpcPolicy policy, IRandomSource decisionRandom)
+        {
+            lock (gate)
+            {
+                ThrowIfDisposed();
+                if (!bindings.ContainsKey(connection)) return false;
+                var view = room.Read(connection).Game;
+                if (view == null || view.LegalActions == null) return false;
+                var action = policy.Choose(view, decisionRandom);
+                return room.Submit(connection, new HoldemRoomAction(view.SessionId, view.HandId,
+                    Guid.NewGuid(), view.SessionVersion, action)).Accepted;
             }
         }
 

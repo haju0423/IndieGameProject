@@ -133,7 +133,7 @@ namespace Poker.Application
     [Serializable]
     public sealed class HoldemHistoryEntryPacket
     {
-        public int kind, street, seat, action;
+        public int kind, street, seat, action, chipAimSeat;
         public long amount, streetTotal;
         public bool hasAction, allIn;
     }
@@ -491,7 +491,7 @@ namespace Poker.Application
                     var entry = history.GetEntry(i);
                     packet.history.entries[i] = new HoldemHistoryEntryPacket { kind = (int)entry.Kind, street = (int)entry.Street,
                         seat = entry.Seat.Value, hasAction = entry.Action.HasValue, action = (int)(entry.Action ?? 0),
-                        amount = entry.Amount, streetTotal = entry.StreetTotal, allIn = entry.IsAllIn };
+                        amount = entry.Amount, streetTotal = entry.StreetTotal, allIn = entry.IsAllIn, chipAimSeat = entry.ChipAimSeat };
                 }
             }
             if (source.Rules != null)

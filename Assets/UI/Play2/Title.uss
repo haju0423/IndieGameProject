@@ -31,7 +31,7 @@
     height: 178px;
     margin-left: -13px;
     margin-bottom: 19px;
-    background-image: url("OneMoreCardLogo.png");
+    background-image: url("PaintedTitleLogo.png");
     background-size: contain;
     background-position: left center;
 }
@@ -72,16 +72,6 @@
     -unity-background-image-tint-color: var(--pine-highlight);
     border-color: var(--cream);
 }
-.menu-button.preview {
-    color: #e1d2b4;
-    background-image: none;
-    background-color: rgba(18, 37, 25, 0.26);
-    border-color: transparent;
-    height: 32px;
-    font-size: 15px;
-    margin-top: 3px;
-}
-.menu-button.preview:hover, .menu-button.preview:focus { border-color: var(--cream); background-color: #294536; }
 .title-notice { white-space: normal; color: #f5d7b1; font-size: 13px; }
 .title-modal {
     position: absolute;
