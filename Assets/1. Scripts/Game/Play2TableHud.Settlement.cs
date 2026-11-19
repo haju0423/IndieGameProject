@@ -222,10 +222,10 @@ internal sealed partial class Play2TableHud
             bool folded = own != null && own.status == (int)HoldemSeatStatus.Folded;
             bool continueFold = folded && game.hasResult && game.canContinue;
             bool continueSpectating = busted && watching && game.canContinue;
-            bool automatic = practice && (oddChips || continueFold || continueSpectating || newPractice && !watching);
+            bool automatic = practice && !game.isOver && (oddChips || continueFold || continueSpectating || newPractice && !watching);
             if (newHand || game.hasResult && !hadResult || oddChips && !hadOddChips)
             {
-                viewingTable = game.hasResult && (automatic || game.result?.kind == (int)HoldemResultKind.Showdown);
+                viewingTable = game.hasResult && (game.isOver || automatic || game.result?.kind == (int)HoldemResultKind.Showdown);
                 autoAdvance = automatic;
                 reviewHeld = false;
                 practiceSeconds = PracticeReadSeconds;
@@ -235,7 +235,8 @@ internal sealed partial class Play2TableHud
             hadOddChips = oddChips;
             bool rematch = !busted && game.isOver && packet.hasRematch && packet.rematchSupported;
             var participants = packet.members ?? Array.Empty<HoldemRoomMemberPacket>();
-            bool allReady = participants.Length > 0 && participants.All(member => member.connected && member.rematchReady);
+            int readyCount = participants.Count(member => member.connected && member.rematchReady);
+            bool allReady = participants.Length > 0 && readyCount == participants.Length;
             bool ownReady = participants.Any(member => member.seat == packet.viewerSeat && member.rematchReady);
             next.gameObject.SetActive(isHost && (oddChips || game.canContinue || rematch || busted));
             next.interactable = !packet.paused && !pending && (!rematch || allReady);
@@ -248,7 +249,7 @@ internal sealed partial class Play2TableHud
             bool waitingForHost = !isHost && !game.isOver && !oddChips && game.canContinue;
             rematchStatus.gameObject.SetActive(!busted && game.isOver || waitingForHost);
             rematchStatus.text = waitingForHost ? "방장이 다음 판을 시작하면 이어집니다."
-                : rematch ? "재경기 준비 " + participants.Count(member => member.connected && member.rematchReady) + "/" + participants.Length
+                : rematch ? (allReady ? $"{readyCount}명 모두 준비" : $"{participants.Length}명 중 {readyCount}명 준비")
                 : "방을 나가 새 경기를 시작할 수 있습니다.";
             string recap = game.hasResult ? AccusationRecap(packet, name) : "";
             tableNoAccusation.gameObject.SetActive(recap == NoAccusation);
@@ -269,13 +270,17 @@ internal sealed partial class Play2TableHud
             }
             var pots = (game.result?.pots ?? Array.Empty<HoldemPotPacket>()).Where(pot => pot != null).ToArray();
             bool showPots = pots.Length > 1 || pots.Any(pot => pot.payouts?.Any(payout => payout?.includesOddChip == true) == true);
-            potDetails.gameObject.SetActive(showPots);
-            if (showPots)
-            {
-                potDetails.text = string.Join("\n", pots.Select((pot, i) => (i == 0 ? "메인 팟" : "사이드 팟 " + i)
+            var returns = (packet.history?.entries ?? Array.Empty<HoldemHistoryEntryPacket>())
+                .Where(entry => entry.kind == (int)HoldemHistoryKind.UncalledReturn && entry.amount > 0)
+                .Select(entry => $"{name(entry.seat)}   콜되지 않은 {entry.amount}칩 반환");
+            var potLines = showPots ? pots.Select((pot, i) => (i == 0 ? "메인 팟" : "사이드 팟 " + i)
                     + " " + pot.amount + "칩  " + string.Join(", ", (pot.payouts ?? Array.Empty<HoldemPayoutPacket>()).Where(payout => payout != null).Select(payout => name(payout.seat)
                     + " +" + payout.amount + "칩" + (payout.includesOddChip ? " (나머지 1칩 포함)" : "")))
-                    + "\n" + Play2SettlementSummary.PotReason(game, pot)));
+                    + "\n" + Play2SettlementSummary.PotReason(game, pot)) : Enumerable.Empty<string>();
+            potDetails.text = string.Join("\n", potLines.Concat(returns));
+            potDetails.gameObject.SetActive(potDetails.text.Length > 0);
+            if (potDetails.gameObject.activeSelf)
+            {
                 potDetails.rectTransform.anchoredPosition = new Vector2(6, -y);
                 float height = potDetails.GetPreferredValues(potDetails.text, 744, float.PositiveInfinity).y + 12;
                 potDetails.rectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, height);
@@ -304,6 +309,12 @@ internal sealed partial class Play2TableHud
             content.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, y + 4);
             card.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, Mathf.Clamp(y + 214, 350, 632));
             if (newHand) scroll.verticalNormalizedPosition = 1;
+        }
+
+        internal void StayForPhoto()
+        {
+            reviewHeld = true;
+            nextLabel.text = practiceAction;
         }
 
         internal void TickPractice(bool halt, Action advance)

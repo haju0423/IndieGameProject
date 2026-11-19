@@ -11,6 +11,7 @@ public sealed class Play2FrontEnd : MonoBehaviour
     private Play2TablePreview table;
     internal RectTransform HudRoot { get; private set; }
     internal TMP_FontAsset Font => chatCanvas.Font;
+    internal bool WaitingForSpectatorRequest() => chatCanvas.WaitingForSpectatorRequest();
     internal bool CaptureChatInput() => chatCanvas.CaptureTableInput();
 
     public void Initialize(Play2TablePreview table)
@@ -33,6 +34,8 @@ public sealed class Play2FrontEnd : MonoBehaviour
         hud = new Play2TableHud(canvasObject.transform, table, chatCanvas.Font, this);
         HudRoot = (RectTransform)canvasRect.Find("Game HUD");
     }
+
+    internal void AlignTableLabels() => hud?.AlignTableLabels();
 
     public void Present(HoldemRoomPacket packet, string status, bool blockActions = false)
     {

@@ -20,6 +20,8 @@ public sealed class Play2RoomSession : MonoBehaviour
     private CryptographicRandomSource previewRandom;
     private HoldemLlmTableDealer previewDealer;
     private Poker.Llm.Unity.LlmUnityMentAnalyzer roomAnalyzer;
+    private static Poker.Llm.Unity.LlmUnityMentAnalyzer retiringAnalyzer;
+    private Action pendingRoomStart;
     private AsyncOperation sceneLoad;
     private HoldemRoomPacket state;
     private string status = "";
@@ -33,8 +35,10 @@ public sealed class Play2RoomSession : MonoBehaviour
 
     internal HoldemRoomPacket State => state;
     internal string Status => status;
-    internal bool IsConnecting => connecting || (online != null && state == null);
+    internal bool WaitingForDealer => pendingRoomStart != null;
+    internal bool IsConnecting => WaitingForDealer || connecting || (online != null && state == null);
     internal bool IsLocal => preview != null;
+    internal bool PracticeDealerMissing => IsLocal && roomAnalyzer == null;
     internal bool WatchingPractice { get; private set; }
     internal bool IsHost => IsLocal || (online != null && online.IsHost);
     internal string RoomCode => online?.RoomName ?? "";
@@ -56,6 +60,12 @@ public sealed class Play2RoomSession : MonoBehaviour
     private void Update()
     {
         if (leaving) return;
+        if (pendingRoomStart != null && retiringAnalyzer == null)
+        {
+            var start = pendingRoomStart;
+            pendingRoomStart = null;
+            start();
+        }
         if (online != null)
         {
             online.Poll();
@@ -87,7 +97,10 @@ public sealed class Play2RoomSession : MonoBehaviour
         {
             previewDealer.Tick();
             if (preview.TryCreateProjection(previewSeats[0], out var packet, state?.revision ?? -1))
+            {
                 state = packet;
+                practiceConversation.Observe(packet);
+            }
         }
 
         ReleaseCompletedAction();
@@ -113,8 +126,15 @@ public sealed class Play2RoomSession : MonoBehaviour
         public int NextInt(int exclusiveMax) => generator.Next(exclusiveMax);
     }
 
-    private readonly HoldemNpcPolicy practicePolicy = new HoldemNpcPolicy(32);
+    // Practice seats follow the lobby order: bull, cat, owl.
+    private readonly HoldemNpcPolicy[] practicePolicies =
+    {
+        new HoldemNpcPolicy(32, PracticeStyle.Pressure),
+        new HoldemNpcPolicy(32, PracticeStyle.Selective),
+        new HoldemNpcPolicy(32)
+    };
     private readonly PracticeRandom practiceRandom = new PracticeRandom();
+    private readonly Play2PracticeConversation practiceConversation = new Play2PracticeConversation();
 
     internal bool PlayPreviewOpponent()
     {
@@ -122,7 +142,9 @@ public sealed class Play2RoomSession : MonoBehaviour
         if (preview == null || game == null || game.currentSeat <= 1 || game.dealPending
             || game.revealPending || game.hasResult) return false;
         Guid actor = previewSeats[game.currentSeat - 1];
-        return preview.TryPlayPracticeOpponent(actor, practicePolicy, practiceRandom);
+        if (practiceConversation.TryAccuse(state, preview, actor, practiceRandom, roomAnalyzer != null)) return true;
+        practiceConversation.BeforeBet(state, preview, actor, practiceRandom, roomAnalyzer != null);
+        return preview.TryPlayPracticeOpponent(actor, practicePolicies[game.currentSeat - 2], practiceRandom);
     }
 
     internal bool Submit(HoldemWireRequest request)
@@ -226,21 +248,30 @@ public sealed class Play2RoomSession : MonoBehaviour
 
     private void DestroyRoomAnalyzer()
     {
-        if (roomAnalyzer != null) Destroy(roomAnalyzer.gameObject);
+        if (roomAnalyzer == null) return;
+        retiringAnalyzer = roomAnalyzer;
+        retiringAnalyzer.Retire();
         roomAnalyzer = null;
     }
+
+    internal void CancelPendingRoomStart() => pendingRoomStart = null;
 
     internal void Connect(bool host, string room, string nickname, int capacity,
         Poker.Llm.Unity.LlmUnityMentAnalyzer hostAnalyzer)
     {
-        if (online != null || preview != null || connecting) return;
+        if (online != null || preview != null || IsConnecting || leaving) return;
+        if (host && hostAnalyzer != null && retiringAnalyzer != null)
+        {
+            pendingRoomStart = () => Connect(host, room, nickname, capacity, hostAnalyzer);
+            return;
+        }
         ClearReconnect();
         ConnectClient(host, room.Trim().ToUpperInvariant(), new HoldemClientIdentity(nickname.Trim()), capacity, hostAnalyzer);
     }
 
     internal void Reconnect()
     {
-        if (!CanReconnect || online != null || preview != null || connecting) return;
+        if (!CanReconnect || online != null || preview != null || IsConnecting || leaving) return;
         ConnectClient(false, reconnectRoom, reconnectIdentity, HoldemRoom.Capacity, null);
     }
 
@@ -269,7 +300,12 @@ public sealed class Play2RoomSession : MonoBehaviour
 
     internal void StartPreview(Poker.Llm.Unity.LlmUnityMentAnalyzer hostAnalyzer)
     {
-        if (preview != null || online != null || connecting) return;
+        if (preview != null || online != null || IsConnecting || leaving) return;
+        if (hostAnalyzer != null && retiringAnalyzer != null)
+        {
+            pendingRoomStart = () => StartPreview(hostAnalyzer);
+            return;
+        }
         ClearReconnect();
         status = "";
         var analyzer = CreateRoomAnalyzer(hostAnalyzer);
@@ -393,6 +429,7 @@ public sealed class Play2RoomSession : MonoBehaviour
 
     private void CloseRoom()
     {
+        CancelPendingRoomStart();
         ClearReconnect();
         ClearPendingAction();
         connecting = false;

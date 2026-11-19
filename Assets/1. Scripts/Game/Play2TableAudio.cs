@@ -3,7 +3,7 @@ using UnityEngine;
 internal sealed class Play2TableAudio : MonoBehaviour
 {
     private AudioSource source;
-    private AudioClip chip, card, turn, result, check, fold, caught, missed;
+    private AudioClip chip, card, turn, result, check, fold, caught, missed, shutter;
     private float lastCard = -1, lastCheck = -1, lastFold = -1;
 
     private void Awake()
@@ -20,11 +20,21 @@ internal sealed class Play2TableAudio : MonoBehaviour
         fold = Resources.Load<AudioClip>("TableAudio/CardFold");
         caught = Resources.Load<AudioClip>("TableAudio/AccusationCaught");
         missed = Resources.Load<AudioClip>("TableAudio/AccusationMissed");
+        shutter = Resources.Load<AudioClip>("TableAudio/PhotoShutter");
     }
 
-    internal void ChipLand() => Play(chip, .7f);
+    private float lastChip = -1f;
+
+    internal void ChipLand(float speed)
+    {
+        // Several chips from one shove can contact the felt on the same physics tick.
+        if (speed < .20f || Time.unscaledTime - lastChip < .065f) return;
+        lastChip = Time.unscaledTime;
+        Play(chip, Mathf.Lerp(.22f, .70f, Mathf.InverseLerp(.20f, 1.65f, speed)));
+    }
     internal void YourTurn() => Play(turn, .45f);
     internal void HandEnd() => Play(result, .5f);
+    internal void TakePhoto() => Play(shutter, .45f);
     internal void Accusation(bool success) => Play(success ? caught : missed, .5f);
 
     internal void Check()

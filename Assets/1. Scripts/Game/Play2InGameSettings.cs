@@ -6,6 +6,17 @@ internal static class Play2AudioVideoSettings
     private const string VolumeKey = "Play2.MasterVolume";
     private const string FullscreenKey = "Play2.Fullscreen";
 
+#if UNITY_STANDALONE && !UNITY_EDITOR
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+    private static void SetFrameRateOnLaunch()
+    {
+        SetFrameRate(Application.isFocused);
+        Application.focusChanged += SetFrameRate;
+    }
+
+    private static void SetFrameRate(bool focused) => Application.targetFrameRate = focused ? 60 : 30;
+#endif
+
     internal static void Restore()
     {
         AudioListener.volume = Mathf.Clamp01(PlayerPrefs.GetFloat(VolumeKey, 1f));

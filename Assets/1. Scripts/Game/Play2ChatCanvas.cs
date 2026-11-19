@@ -33,7 +33,10 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     private int requestedEditFrame = -1;
     private int releasedFocusFrame = -1;
     private InputAction openChat;
-    private TMP_Text historyLabel;
+    private TMP_Text historyLabel, chatHeading, unreadLabel;
+    private UnityEngine.UI.Button unreadButton;
+    private long readThrough;
+    private int shownUnread;
     private TMP_Text requestHint, sendLabel, dealerLabel;
     private UnityEngine.UI.Image dealerBackground;
     private Play2RoomSession roomSession;
@@ -41,11 +44,28 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     private bool canRequest;
     private bool deliveryUnconfirmed;
     private float dealerReceiptUntil;
+    private string practiceGraceWindow;
+    private float practiceGraceUntil;
     private float savedChatOffset, layoutCanvasHeight;
     private int visibleRecords = -1;
     private readonly List<(int street, int accuser, int target, bool caught)> verdicts = new();
     internal TMPro.TMP_FontAsset Font => messages.font;
     internal bool IsTyping => panel.activeInHierarchy && (input.isFocused || requestedEditFrame == Time.frameCount);
+
+    internal bool WaitingForSpectatorRequest()
+    {
+        if (!dealer.isOn || !canRequest || packet?.ownUtterances?.windowId == null) return false;
+        var self = System.Array.Find(packet.game.seats, seat => seat.viewer);
+        if (self == null || (self.status != (int)HoldemSeatStatus.Folded && self.status != (int)HoldemSeatStatus.Busted))
+            return false;
+        string window = packet.ownUtterances.windowId;
+        if (practiceGraceWindow != window)
+        {
+            practiceGraceWindow = window;
+            practiceGraceUntil = Time.unscaledTime + 5f;
+        }
+        return Time.unscaledTime < practiceGraceUntil;
+    }
 
     internal void Initialize(Play2TablePreview owner)
     {
@@ -75,8 +95,17 @@ public sealed class Play2ChatCanvas : MonoBehaviour
             releasedFocusFrame = Time.frameCount;
             requestedEditFrame = -1;
         });
-        input.onSubmit.AddListener(_ => Send());
-        dealer.onValueChanged.AddListener(_ => RefreshComposer());
+        input.onSubmit.AddListener(_ =>
+        {
+            if (string.IsNullOrWhiteSpace(input.text)) focusRequested = true;
+            else Send();
+        });
+        dealer.onValueChanged.AddListener(_ =>
+        {
+            RefreshComposer();
+            // Move keyboard input to the draft before Enter can submit the selected toggle again.
+            focusRequested = input.interactable;
+        });
         input.onValueChanged.AddListener(_ =>
         {
             deliveryUnconfirmed = false;
@@ -106,6 +135,15 @@ public sealed class Play2ChatCanvas : MonoBehaviour
             18, ChatText, Font, TextAlignmentOptions.MidlineLeft, FontStyles.Bold);
         label.rectTransform.anchorMin = label.rectTransform.anchorMax = label.rectTransform.pivot = Vector2.up;
         label.rectTransform.anchoredPosition = new Vector2(21, -4);
+        chatHeading = label;
+        unreadButton = Play2HudArt.Button("New Chat Messages", panelRect, "", Vector2.zero, new Vector2(115, 27),
+            "ActionRow", Play2UGui.Gold, Font, ShowLatestMessages, 15);
+        var unreadRect = (RectTransform)unreadButton.transform;
+        unreadRect.anchorMin = unreadRect.anchorMax = unreadRect.pivot = Vector2.up;
+        unreadRect.anchoredPosition = new Vector2(9, -5);
+        unreadButton.targetGraphic.color = Play2UGui.PineInset;
+        unreadLabel = unreadButton.GetComponentInChildren<TMP_Text>();
+        unreadButton.gameObject.SetActive(false);
         var hint = Play2UGui.Text("Chat Close Hint", panelRect, "Esc 입력 종료", new Vector2(-57, -23), new Vector2(100, 20),
             13, Play2UGui.Gold, Font, TextAlignmentOptions.MidlineRight);
         hint.rectTransform.anchorMin = hint.rectTransform.anchorMax = Vector2.one;
@@ -233,8 +271,32 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         if (!recordsOpen) RestoreScroll(savedChatOffset >= 0, savedChatOffset);
     }
 
+    private void ShowLatestMessages()
+    {
+        if (recordsOpen) ToggleHistory();
+        RestoreScroll(false, 0);
+        UpdateUnread();
+    }
+
+    private void UpdateUnread()
+    {
+        var entries = packet?.chat?.entries;
+        if (entries == null || !panel.activeInHierarchy) return;
+        long latest = entries.Length == 0 ? 0 : entries[entries.Length - 1].sequence;
+        if (!recordsOpen && (scroll.content.rect.height <= scroll.viewport.rect.height
+            || scroll.verticalNormalizedPosition <= .01f))
+            readThrough = latest;
+        int unread = (int)System.Math.Clamp(latest - readThrough, 0L, entries.LongLength);
+        if (unread == shownUnread) return;
+        shownUnread = unread;
+        if (unread > 0) unreadLabel.text = $"새 대화 {unread} ↓";
+        unreadButton.gameObject.SetActive(unread > 0);
+        chatHeading.gameObject.SetActive(unread == 0);
+    }
+
     private void LateUpdate()
     {
+        UpdateUnread();
         if (composing != IsTyping) SetComposing(IsTyping);
         if (dealerReceiptUntil > 0 && Time.unscaledTime >= dealerReceiptUntil)
         {
@@ -303,6 +365,8 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     {
         if (ReferenceEquals(packet, value)) return;
         if (value?.hasGame != true) PreserveReconnectDraft();
+        if (packet?.sessionId != value?.sessionId || packet?.viewerSeat != value?.viewerSeat)
+            readThrough = value?.chat?.entries?.LastOrDefault()?.sequence ?? 0;
         if (packet?.sessionId != value?.sessionId || packet?.viewerSeat != value?.viewerSeat
             || packet?.game?.handId != value?.game?.handId)
         {
@@ -327,7 +391,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
             return;
         }
 
-        canRequest = !packet.paused && packet.hasOwnUtterances && packet.ownUtterances.canSubmit
+        canRequest = !roomSession.PracticeDealerMissing && !packet.game.hasResult && !packet.paused && packet.hasOwnUtterances && packet.ownUtterances.canSubmit
             && (packet.ownUtterances.unlimitedMessages || packet.ownUtterances.remaining > 0)
             && packet.game.street < (int)HoldemStreet.River;
         input.characterLimit = packet.chat.maximumTextLength;
@@ -499,9 +563,12 @@ public sealed class Play2ChatCanvas : MonoBehaviour
             : deliveryUnconfirmed ? "전송 여부를 대화에서 확인해 주세요"
             : dealer.isOn ? "이번 문장을 딜러에게도 전달"
             : dealerReceiptUntil > 0 && string.IsNullOrEmpty(input.text) ? "딜러에게 전달했어요"
-            : "문장은 모두에게 보여요";
-        dealerLabel.text = dealer.isOn ? "요청 켜짐" : "딜러 요청";
-        dealerLabel.color = dealer.isOn ? Play2UGui.Ink : ChatText;
-        dealerBackground.color = dealer.isOn ? Play2UGui.Gold : Play2UGui.PineInset;
+            : !canRequest ? "테이블 대화는 계속할 수 있어요" : "문장은 모두에게 보여요";
+        bool missing = roomSession.PracticeDealerMissing;
+        bool finished = packet?.game != null && (packet.game.hasResult || packet.game.street >= (int)HoldemStreet.River);
+        string unavailable = missing ? "딜러 없음" : finished ? "요청 종료" : "요청 대기";
+        dealerLabel.text = dealer.isOn ? "요청 켜짐" : canRequest ? "딜러 요청" : unavailable;
+        dealerLabel.color = dealer.isOn ? Play2UGui.Ink : canRequest ? ChatText : Play2UGui.Hex("B4BEB3");
+        dealerBackground.color = dealer.isOn ? Play2UGui.Gold : canRequest ? Play2UGui.PineInset : Play2UGui.Hex("2C3833");
     }
 }

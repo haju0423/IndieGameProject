@@ -155,6 +155,13 @@ internal sealed class Play2TableReactions
             Begin(seat, seat, result == ResultPose.Win ? Play2Gesture.Celebrate : Play2Gesture.Despair, 0f);
     }
 
+    internal bool PlayingReaction(int seat)
+    {
+        if (started[seat] >= 0f || results[seat] == ResultPose.Win) return true;
+        return usingResultClip[seat] && resultLayers[seat] >= 0 && animators[seat].isActiveAndEnabled
+            && animators[seat].GetCurrentAnimatorStateInfo(resultLayers[seat]).normalizedTime < 1f;
+    }
+
     internal void Animate()
     {
         bool showAim = AimSeat > 0 && state?.game?.hasResult == false && heads[AimSeat - 1] != null;
@@ -266,8 +273,8 @@ internal sealed class Play2TableReactions
     private void Close() { if (menu != null) menu.gameObject.SetActive(false); }
     private static string Name(HoldemRoomPacket packet, int seat) => packet.members.FirstOrDefault(m => m.seat == seat)?.name ?? seat + "번";
 
-    internal static string Describe(string text, HoldemRoomPacket packet) => Parse(text, out int target, out bool finger)
-        ? Name(packet, target) + (finger ? "에게 손가락 욕" : "에게 손 흔들기") : text;
+    internal static string Describe(string text, HoldemRoomPacket packet) => Play2MatchFinale.DescribePose(text) ?? (Parse(text, out int target, out bool finger)
+        ? Name(packet, target) + (finger ? "에게 손가락 욕" : "에게 손 흔들기") : text);
 
     private static bool Parse(string text, out int target, out bool finger)
     {

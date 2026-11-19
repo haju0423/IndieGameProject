@@ -132,7 +132,17 @@ internal sealed class Play2TableAtmosphere : MonoBehaviour
             bool livePair = remaining == 2 && seat?.dealtIn == true && !folded && !outOfGame && game?.hasResult == false;
             bool openingHand = i + 1 == revealingSeat;
             bool focus = beat == Play2TablePreview.ShowdownBeat.Finished || System.Array.IndexOf(highlighted, i + 1) >= 0;
-            seatIntensity[i] = award && seat?.awarded > 0 ? (focus ? 2.35f : 1.2f) : reveal && openingHand ? 1.8f : livePair ? 1.5f : 0f;
+            seatIntensity[i] = award && seat?.awarded > 0 ? (focus ? 1.05f : .70f) : reveal && openingHand ? .95f : livePair ? .75f : 0f;
+        }
+    }
+
+    internal void LightPortrait(int winner)
+    {
+        targetDim = .30f;
+        for (int i = 0; i < targetShade.Length; i++)
+        {
+            targetShade[i] = 1f;
+            seatIntensity[i] = i + 1 == winner ? 1.05f : .42f;
         }
     }
 

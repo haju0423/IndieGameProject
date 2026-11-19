@@ -4,11 +4,14 @@ using UnityEngine;
 internal sealed class Play2CardGrip
 {
     private const float Flight = 0.36f;
-    private const float Lift = .57f;
+    private const float Lift = .58f;
+    private const float Peek = 1.47f;
+    private const float SwitchCorner = .62f;
+    private readonly Play2CardPeel[] peels;
     private const float Settle = .16f;
     private readonly Vector3 pocket;
-    private const float GripHeight = 0.044f;
-    private const float ViewWristBend = 40f * Mathf.Deg2Rad;
+    private const float GripHeight = 0.028f;
+    private const float ViewWristBend = 53f * Mathf.Deg2Rad;
     private const float PutDown = 0.50f;
     private const float LowerArm = 0.30f;
     private const float FoldedScale = 1.10f;
@@ -16,7 +19,7 @@ internal sealed class Play2CardGrip
     private readonly Play2FingerRig fingers;
     private readonly Pose contact;
     private readonly Quaternion wristRest, upperRest, forearmRest;
-    private readonly Vector3 shoulderLocal;
+    private readonly Vector3 shoulderLocal, elbowLocal;
     private readonly Vector3 outward, lateral, deck, tableCenter, foldPile;
     private readonly Quaternion deckRotation;
     private readonly float firstLaunch, gap, heldCardScale;
@@ -61,12 +64,14 @@ internal sealed class Play2CardGrip
         return Rect.MinMaxRect(min.x, min.y, max.x, max.y).Contains(point);
     }
     private Pose foldFrom, firstInGrip, secondInGrip;
-    private Quaternion muckFacing;
+    private Quaternion muckFacing, fanInGrip;
+    private float viewSupport;
+    private Vector2 bendAtRelease;
 
-    internal static float Duration(float gap) => gap + Flight + Settle + Lift;
+    internal static float Duration(float gap, bool peek) => gap + Flight + Settle + (peek ? Peek : 0f) + Lift;
 
     internal Play2CardGrip(GameObject player, Transform view, Transform table, Transform eye, Vector3 dealOrigin,
-        CardVisual first, CardVisual second, float delay, float gap, bool openingPeek, System.Action peekSound = null)
+        CardVisual first, CardVisual second, float delay, float gap, bool openingPeek, Material curvedPaper, System.Action peekSound = null)
     {
         camera = view;
         this.first = first;
@@ -76,14 +81,17 @@ internal sealed class Play2CardGrip
         this.gap = gap;
         this.openingPeek = openingPeek;
         this.peekSound = peekSound;
+        if (openingPeek && view != null)
+            peels = new[] { new Play2CardPeel(first.transform, curvedPaper), new Play2CardPeel(second.transform, curvedPaper) };
         firstLaunch = Time.time + delay;
         outward = Vector3.ProjectOnPlane(eye.position - table.position, Vector3.up).normalized;
         lateral = Vector3.Cross(outward, Vector3.up);
         tableCenter = table.position + Vector3.up * 0.045f;
         deck = dealOrigin;
-        deckRotation = Quaternion.LookRotation(-outward) * Quaternion.Euler(0f, 0f, 180f);
+        deckRotation = Quaternion.LookRotation(-outward) * (openingPeek
+            ? Quaternion.AngleAxis(180f, Vector3.right) : Quaternion.AngleAxis(180f, Vector3.forward));
         muckFacing = deckRotation;
-        pocket = table.position + outward * .50f + lateral * (view != null ? -.125f : .125f) + Vector3.up * .013f;
+        pocket = table.position + outward * (openingPeek ? .42f : .50f) + lateral * (view != null ? -.07f : .125f) + Vector3.up * .013f;
         foldPile = table.position + outward * 0.48f + lateral * 0.08f + Vector3.up * 0.006f;
 
         bool left = camera != null;
@@ -94,7 +102,7 @@ internal sealed class Play2CardGrip
                 viewModel.GetComponent<Play2FingerRig>().BindViewCopy(originalRig);
             viewModel.name = "First Person Left Arm";
             viewModel.transform.SetLocalPositionAndRotation(Vector3.zero, Quaternion.identity);
-            viewModel.transform.localScale = player.transform.lossyScale;
+            viewModel.transform.localScale = player.transform.lossyScale * .86f;
             viewModel.SetActive(true);
             player = viewModel;
         }
@@ -104,11 +112,15 @@ internal sealed class Play2CardGrip
         wrist = animator.GetBoneTransform(left ? HumanBodyBones.LeftHand : HumanBodyBones.RightHand);
         wristRest = wrist.localRotation;
         shoulderLocal = upperArm.localPosition;
+        elbowLocal = forearm.localPosition;
         upperRest = upperArm.localRotation;
         forearmRest = forearm.localRotation;
         fingers = Play2FingerRig.Attach(animator);
         fingers.SetCardGrip(left, 1f);
-        contact = fingers.CardContact(left, wrist);
+        Pose openPinch = fingers.CardContact(left, wrist);
+        fingers.PinchPacket(left, wrist, 1f, heldCardScale);
+        // Once the pads touch, their tiny separation is an unstable axis for the wrist.
+        contact = new Pose(fingers.CardContact(left, wrist).position, openPinch.rotation);
         fingers.SetCardGrip(left, 0f);
 
         if (left)
@@ -118,6 +130,16 @@ internal sealed class Play2CardGrip
             fingers.PrepareViewMesh(armSkin);
             ShowArmOnly(armSkin, upperArm);
             viewModel.SetActive(false);
+        }
+    }
+
+    internal float PeekFocus
+    {
+        get
+        {
+            if (!openingPeek || folded || foldStarted >= 0f) return 0f;
+            float atPocket = Time.time - firstLaunch - gap - Flight;
+            return Ease(atPocket / .29f) * (1f - Ease((atPocket - Peek - Settle) / Lift));
         }
     }
 
@@ -132,7 +154,7 @@ internal sealed class Play2CardGrip
                 return (revealed ? 1f : .32f) * Ease(t / .28f) * (1f - Ease((t - .45f) / .35f));
             }
             float dealt = Time.time - firstLaunch;
-            return Ease(dealt / Flight) * (1f - Ease((dealt - gap - Flight - Settle) / Lift));
+            return Ease(dealt / Flight) * (1f - Ease((dealt - gap - Flight - Settle - (openingPeek ? Peek : 0f)) / Lift));
         }
     }
 
@@ -155,28 +177,40 @@ internal sealed class Play2CardGrip
         if (!visible) return;
 
         float reach = Ease(time / Flight);
-        float opening = Mathf.Clamp01((time - gap - Flight - Settle) / Lift);
+        float atPocket = time - gap - Flight - Settle;
+        float opening = Mathf.Clamp01((atPocket - (openingPeek ? Peek : 0f)) / Lift);
         float lift = Ease(opening);
         float curl = Ease((time - gap - Flight + .03f) / (Settle + .05f));
         // The thumb relaxes just enough to accept the second card.
         float secondCatch = 1f - Mathf.Abs((time - gap - Flight) / 0.12f);
         float thumbSlip = 0f;
-        if (openingPeek && left && opening > 0f && opening < 1f)
+        if (openingPeek && left && atPocket > 0f && atPocket < Peek)
         {
-            float release = Mathf.Clamp01((opening - .34f) / .26f);
+            float release = Mathf.Clamp01(atPocket / .34f);
             thumbSlip = .48f * Mathf.Sin(release * Mathf.PI);
             if (!heardPeek && release >= .5f) { heardPeek = true; peekSound?.Invoke(); }
         }
         fingers.SetCardGrip(left, curl, Mathf.Max(thumbSlip, .22f * Ease(secondCatch)));
+
+        float gathered = openingPeek ? Gather(atPocket) : 0f;
+        fingers.PinchPacket(left, wrist, left ? curl * Mathf.Max(gathered, lift) : curl, heldCardScale);
 
         Vector3 gripPoint;
         Quaternion cardRotation;
         if (left)
         {
             Vector3 receive = pocket + outward * .051f + Vector3.up * .015f;
+            if (openingPeek)
+            {
+                float follow = Ease((atPocket - SwitchCorner) / .26f);
+                var nearEdge = new Vector3(-.048f, 0f, .026f);
+                Vector3 firstPad = PeekContact(0, nearEdge, atPocket, true);
+                Vector3 secondPad = PeekContact(1, nearEdge, atPocket, true);
+                receive = Vector3.Lerp(Vector3.Lerp(firstPad, secondPad, follow), TablePinch, gathered);
+            }
             receive = Vector3.Lerp(camera.TransformPoint(new Vector3(-.22f, -.37f, .33f)), receive, reach);
-            Vector3 resting = new(-.097f, -.219f, .46f);
-            Vector3 reading = new(-.055f, -.190f, .43f);
+            Vector3 resting = new(-.130f, -.241f, .415f);
+            Vector3 reading = new(-.072f, -.166f, .364f);
             gripPoint = Vector3.Lerp(receive, camera.TransformPoint(Vector3.Lerp(resting, reading, Ease(inspection))), lift);
             float receivePitch = openingPeek ? -30f : -53f;
             cardRotation = camera.rotation * Quaternion.Euler(Mathf.Lerp(receivePitch, Mathf.Lerp(-86f, -89f, inspection), lift), -2f, 0f);
@@ -186,17 +220,43 @@ internal sealed class Play2CardGrip
             Vector3 catchPoint = pocket + outward * .05f + Vector3.up * .012f;
             Vector3 held = tableCenter + outward * 0.48f + lateral * 0.16f + Vector3.up * (0.058f + standingRise * .62f);
             gripPoint = Vector3.Lerp(Vector3.Lerp(wrist.TransformPoint(contact.position), catchPoint, reach), held, lift);
-            Vector3 face = Vector3.Lerp(outward * 0.55f + Vector3.up * 0.83f, outward + Vector3.up * 0.22f, lift);
+            // The same seated player holds the fan toward their own chest in every view.
+            Vector3 cover = (outward - lateral * .06f + Vector3.up * .17f).normalized;
+            Vector3 face = Vector3.Lerp(outward * .55f + Vector3.up * .83f, cover, lift);
             cardRotation = Quaternion.LookRotation(Vector3.ProjectOnPlane(Vector3.up, face), face);
         }
 
-        Quaternion wristRotation = cardRotation * Quaternion.Inverse(contact.rotation);
+        // Turn the wrist edge-on to the fan so the knuckles wrap behind it.
+        Quaternion wristCardFrame = left
+            ? cardRotation * Quaternion.Euler(0f, 58f * lift, 18f * lift)
+            : cardRotation;
+        Quaternion wristRotation = wristCardFrame * Quaternion.Inverse(contact.rotation);
         if (!left) wristRotation = Quaternion.Slerp(wrist.rotation, wristRotation, reach);
-        Vector3 wristTarget = gripPoint - wristRotation * Vector3.Scale(contact.position, wrist.lossyScale);
+        Vector3 pad = contact.position;
+        if (openingPeek && left && lift < 1f)
+        {
+            // A side-on thumb can lift the paper without covering the printed corner.
+            var shielding = fingers.PalmRotation(true, -outward + lateral * .34f, Vector3.down - lateral * .15f);
+            wristRotation = Quaternion.Slerp(shielding, wristRotation, lift);
+            pad = Vector3.Lerp(fingers.FingerPad(true, 0, wrist), contact.position, Mathf.Max(lift, gathered));
+        }
+        Vector3 wristTarget = gripPoint - wristRotation * Vector3.Scale(pad, wrist.lossyScale);
         PoseArm(wristTarget, wristRotation, reach, lift);
 
+        if (openingPeek && left && time >= gap + Flight && lift < 1f)
+        {
+            float follow = Ease((atPocket - SwitchCorner) / .26f);
+            // The index stays on the back of the sheet as the thumb turns its corner.
+            var press = new Vector3(-.016f, 0f, .005f);
+            Vector3 support = Vector3.Lerp(PeekContact(0, press, atPocket, false),
+                PeekContact(1, press, atPocket, false), follow);
+            fingers.PressCardBack(support, (1f - gathered) * Ease((time - gap - Flight) / Settle));
+        }
         gripPoint = wrist.TransformPoint(contact.position);
-        Quaternion gripRotation = wrist.rotation * contact.rotation;
+        viewSupport = left ? lift : 0f;
+        if (viewSupport > 0f && pushTime < 0f)
+            fingers.SupportFan(gripPoint, cardRotation, heldCardScale, viewSupport);
+        Quaternion gripRotation = left ? cardRotation : wrist.rotation * contact.rotation;
         MoveCard(first.transform, 0, time, opening, lift, gripPoint, gripRotation);
         if (time >= gap) MoveCard(second.transform, 1, time - gap, opening, lift, gripPoint, gripRotation);
         if (waitingToMuck && time >= gap + Flight) { BeginPutDown(); return; }
@@ -209,11 +269,22 @@ internal sealed class Play2CardGrip
             Vector3 cardPad = RestForPush(first.transform, 0, lower);
             RestForPush(second.transform, 1, lower);
             float atChips = Ease((pushTime - .18f) / .12f) * (1f - Ease((pushTime - .80f) / .21f));
-            Vector3 pad = Vector3.Lerp(cardPad + outward * .025f + Vector3.up * .016f, pushPalm, atChips);
-            Vector3 openTarget = pad - down * Vector3.Scale(fingers.PushContact(left), wrist.lossyScale);
+            Vector3 pushPad = Vector3.Lerp(cardPad + outward * .025f + Vector3.up * .016f, pushPalm, atChips);
+            Vector3 openTarget = pushPad - down * Vector3.Scale(fingers.PushContact(left), wrist.lossyScale);
             fingers.SetCardGrip(left, Mathf.Lerp(curl, .32f, lower));
+            fingers.PinchPacket(left, wrist, curl * (1f - lower), heldCardScale);
             PoseArm(Vector3.Lerp(heldTarget, openTarget, lower), Quaternion.Slerp(heldWrist, down, lower), 1, lift, true);
+            viewSupport *= 1f - lower;
+            if (viewSupport > 0f)
+                fingers.SupportFan(wrist.TransformPoint(contact.position), cardRotation, heldCardScale, viewSupport);
         }
+    }
+
+    internal float ReachablePush(Vector3 startPad, Vector3 travel)
+    {
+        Quaternion down = fingers.PalmRotation(false, -outward, Vector3.down);
+        Vector3 offset = down * Vector3.Scale(fingers.PushContact(false), wrist.lossyScale);
+        return Play2TableArm.ReachablePush(upperArm, forearm, wrist, startPad, travel, offset);
     }
 
     private Vector3 RestForPush(Transform card, int index, float down)
@@ -232,7 +303,7 @@ internal sealed class Play2CardGrip
         if (viewModel != null)
         {
             upperArm.SetLocalPositionAndRotation(shoulderLocal, upperRest);
-            forearm.localRotation = forearmRest;
+            forearm.SetLocalPositionAndRotation(elbowLocal, forearmRest);
             float elbowHeight = Mathf.Lerp(-0.58f, -0.40f, lift);
             Vector3 towardGrip = wristTarget - camera.TransformPoint(new Vector3(-0.34f, elbowHeight, 0.20f));
             Vector3 armDirection = push ? towardGrip.normalized : Vector3.RotateTowards(neutralDirection, towardGrip.normalized, ViewWristBend, 0f);
@@ -268,11 +339,13 @@ internal sealed class Play2CardGrip
 
     private void BeginPutDown()
     {
+        if (peels != null) bendAtRelease = new Vector2(peels[0].Bend, peels[1].Bend);
         waitingToMuck = false;
         foldStarted = Time.time;
         foldFrom = new Pose(wrist.TransformPoint(contact.position), wrist.rotation * contact.rotation);
         firstInGrip = RelativeToFoldGrip(first.transform);
         secondInGrip = RelativeToFoldGrip(second.transform);
+        fanInGrip = Quaternion.Slerp(firstInGrip.rotation, secondInGrip.rotation, .5f);
         var heading = Vector3.ProjectOnPlane(first.transform.forward, Vector3.up);
         if (heading.sqrMagnitude < .12f) heading = -outward;
         muckFacing = Quaternion.LookRotation(heading.normalized, Vector3.down);
@@ -304,6 +377,14 @@ internal sealed class Play2CardGrip
             return;
         }
 
+        if (bendAtRelease != Vector2.zero)
+        {
+            float remaining = 1f - Ease(time / .18f);
+            peels[0].SetBend(bendAtRelease.x * remaining);
+            peels[1].SetBend(bendAtRelease.y * remaining);
+            if (remaining <= 0f) bendAtRelease = Vector2.zero;
+        }
+
         if (!revealed)
         {
             Muck(time, left);
@@ -320,10 +401,13 @@ internal sealed class Play2CardGrip
         Vector3 idle = left ? camera.TransformPoint(new Vector3(-.16f, -.43f, .35f)) : wrist.position;
         Quaternion idleRotation = left ? foldFrom.rotation * Quaternion.Inverse(contact.rotation) : wrist.rotation;
         fingers.SetCardGrip(left, 1f - release);
+        fingers.PinchPacket(left, wrist, 1f - release, heldCardScale);
         PoseArm(Vector3.Lerp(wristTarget, idle, retreat), Quaternion.Slerp(wristRotation, idleRotation, retreat),
             1f - retreat, 1f - down);
         Vector3 actualGrip = wrist.TransformPoint(contact.position);
         Quaternion actualRotation = wrist.rotation * contact.rotation;
+        if (viewSupport > 0f && release < 1f)
+            fingers.SupportFan(actualGrip, actualRotation * fanInGrip, heldCardScale, viewSupport * (1f - release));
         UpdateFoldingCard(first, firstInGrip, 0, actualGrip, actualRotation, release);
         UpdateFoldingCard(second, secondInGrip, 1, actualGrip, actualRotation, release);
     }
@@ -355,8 +439,11 @@ internal sealed class Play2CardGrip
         leaving.y += .020f * Mathf.Sin(Mathf.PI * retreat);
         PoseArm(leaving, Quaternion.Slerp(wristRotation, restRotation, retreat), 1f - retreat, 1f - lower, true);
         fingers.SetCardGrip(left, (1f - .65f * lower) * (1f - release));
+        fingers.PinchPacket(left, wrist, 1f - lower, heldCardScale);
         Vector3 pinch = wrist.TransformPoint(contact.position);
         Quaternion facing = wrist.rotation * contact.rotation;
+        if (viewSupport > 0f && lower < 1f)
+            fingers.SupportFan(pinch, facing * fanInGrip, heldCardScale, viewSupport * (1f - lower));
         PlaceMuckedCard(first, firstInGrip, 0, pinch, facing, lower, slide);
         PlaceMuckedCard(second, secondInGrip, 1, pinch, facing, lower, slide);
     }
@@ -402,6 +489,7 @@ internal sealed class Play2CardGrip
 
     private void FinishFold()
     {
+        if (peels != null) foreach (var peel in peels) peel.SetBend(0f);
         PutCardFaceDown(first, 0);
         PutCardFaceDown(second, 1);
         fingers.SetCardGrip(viewModel != null, 0f);
@@ -421,38 +509,68 @@ internal sealed class Play2CardGrip
     private void MoveCard(Transform card, int index, float time, float opening, float fan, Vector3 gripPoint, Quaternion facing)
     {
         float travel = Ease(time / Flight);
-        float spread = camera != null ? Mathf.Lerp(12f, 18f, inspection) : 18f;
+        float spread = camera != null ? Mathf.Lerp(12f, 18f, inspection) : 11f;
         float angle = index == 0 ? -spread : spread;
         Quaternion rotation = facing * Quaternion.AngleAxis(angle * fan, Vector3.up);
-        if (openingPeek && opening < 1f)
-        {
-            // Both cards hinge at the pinch. The second corner follows the first under the thumb.
-            float start = .12f + index * .28f;
-            float turn = Mathf.Clamp01((opening - start) / (1f - start));
-            float hinge = Ease(turn);
-            // The thumb holds the corner down, then releases it with a short paper snap.
-            float pitch = 112f * (1f - hinge) - 5f * Mathf.Sin(Mathf.PI * turn) * hinge;
-            rotation *= Quaternion.AngleAxis(pitch, Vector3.right);
-        }
-        Vector3 held = gripPoint + rotation * new Vector3(0f, index * 0.0035f - 0.0015f, GripHeight * card.localScale.z);
-        float separation = camera != null ? .014f : .010f;
-        held += facing * Vector3.right * ((index == 0 ? -separation : separation) * fan);
-        Vector3 landing = pocket + lateral * (index == 0 ? -.022f : .022f) + Vector3.up * (.003f * index);
-        Quaternion back = deckRotation * Quaternion.AngleAxis(index == 0 ? -7f : 7f, Vector3.up);
+        // Both lower corners pivot at the same pinch. Spread the indices at the top of the fan.
+        Vector3 anchor = camera != null ? new Vector3((index == 0 ? .014f : .032f) * fan, 0f, GripHeight)
+            : new Vector3(-.018f, 0f, .049f);
+        Vector3 held = gripPoint + rotation * (anchor * heldCardScale)
+            + (facing * Vector3.up) * ((index - .5f) * .0035f * heldCardScale);
+        Vector3 landing = Landing(index);
+        Quaternion back = BackFacing(index);
         if (time < Flight)
         {
             Vector3 slide = Vector3.Lerp(deck, landing, travel) + Vector3.up * (Mathf.Sin(travel * Mathf.PI) * .031f);
             card.SetPositionAndRotation(slide, Quaternion.Slerp(deckRotation, back, travel));
             return;
         }
-        float pickup = Ease(opening / .60f);
-        card.SetPositionAndRotation(Vector3.Lerp(landing, held, pickup), Quaternion.Slerp(back, rotation, pickup));
+        float pickup = Ease(opening);
+        if (peels != null)
+        {
+            float sinceLanding = Time.time - firstLaunch - gap - Flight - Settle;
+            peels[index].SetBend(waitingToMuck || revealed ? 0f : CornerAmount(index, sinceLanding));
+        }
+        Quaternion turning = Quaternion.Slerp(back, rotation, pickup);
+        if (peels != null)
+        {
+            // Square the bottom edges on the felt before lifting. Once gripped,
+            // rotate the pair around the fingers so it cannot lag behind the wrist.
+            float gathered = Gather(Time.time - firstLaunch - gap - Flight - Settle);
+            Vector3 offset = new Vector3(index == 0 ? .014f : .032f, (index - .5f) * .0035f, GripHeight) * heldCardScale;
+            Vector3 pivot = opening > 0f ? gripPoint : TablePinch;
+            card.SetPositionAndRotation(Vector3.Lerp(landing, pivot + turning * offset, gathered), turning);
+        }
+        else card.SetPositionAndRotation(Vector3.Lerp(landing, held, pickup), turning);
         if (camera != null)
         {
-            bool readable = !waitingToMuck && opening >= (openingPeek ? .28f + .19f * index : .16f);
+            bool readable = !waitingToMuck && opening >= .16f;
             if (fronts[index].activeSelf != readable) fronts[index].SetActive(readable);
         }
     }
+
+    private Vector3 PeekContact(int index, Vector3 point, float elapsed, bool thumb)
+    {
+        Quaternion facing = BackFacing(index);
+        Vector3 bent = Play2CardPeel.BentPoint(point, CornerAmount(index, elapsed), out var normal);
+        Vector3 pad = Landing(index) + facing * ((bent + normal * (thumb ? .0055f : -.008f)) * heldCardScale);
+        pad.y = Mathf.Max(pad.y, Landing(index).y + .006f);
+        return pad;
+    }
+
+    private Vector3 TablePinch => pocket + deckRotation * (new Vector3(-.023f, 0f, -GripHeight) * heldCardScale)
+        + Vector3.up * .003f;
+    private static float Gather(float elapsed) => Ease((elapsed - 1.08f) / .36f);
+
+    private static float CornerAmount(int index, float elapsed)
+    {
+        float lift = Ease((elapsed - index * SwitchCorner) / .29f);
+        return lift * (index == 0 ? 1f - Ease((elapsed - SwitchCorner) / .24f) : 1f - Gather(elapsed));
+    }
+
+    private Vector3 Landing(int index) => pocket + lateral * ((index == 0 ? -1f : 1f) * (openingPeek ? .057f : .027f))
+        + Vector3.up * (.005f * index);
+    private Quaternion BackFacing(int index) => deckRotation * Quaternion.AngleAxis((index == 0 ? -1f : 1f) * (openingPeek ? 5f : 7f), Vector3.up);
 
     private static float Ease(float value) => Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(value));
 
@@ -498,6 +616,7 @@ internal sealed class Play2CardGrip
 
     internal void Release()
     {
+        if (peels != null) foreach (var peel in peels) peel.Release();
         if (viewModel != null) Object.Destroy(viewModel);
         else fingers.SetCardGrip(false, 0f);
     }
