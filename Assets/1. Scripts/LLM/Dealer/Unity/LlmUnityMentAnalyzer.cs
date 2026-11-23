@@ -23,9 +23,10 @@ namespace Poker.Llm.Unity
         [SerializeField, Min(1)] private int interpreterMaxTokens = 80;
         [SerializeField] private bool warmupOnStart = true;
 
-        // LLMAgent 하나는 요청을 동시에 처리하지 못하므로 에이전트별로 순서대로 보낸다.
-        private readonly SemaphoreSlim _gate = new SemaphoreSlim(1, 1);
-        private readonly SemaphoreSlim _interpreterGate = new SemaphoreSlim(1, 1);
+        // Both agents use the same native service. A timed-out response still owns it until Chat returns.
+        private readonly SemaphoreSlim nativeGate = new SemaphoreSlim(1, 1);
+        private Task drain;
+        private bool retryQuit;
 
         private CancellationTokenSource lifetime;
         private Task warmup;
@@ -36,6 +37,7 @@ namespace Poker.Llm.Unity
 
         private void Awake()
         {
+            Application.wantsToQuit += PrepareToQuit;
             if (agent == null)
             {
                 Debug.LogError($"[{nameof(LlmUnityMentAnalyzer)}] LLMAgent is not assigned.", this);
@@ -65,30 +67,72 @@ namespace Poker.Llm.Unity
 
         private void OnEnable()
         {
+            if (drain != null) return;
             lifetime = new CancellationTokenSource();
             warmup = warmupOnStart && agent != null ? WarmupAsync(lifetime.Token) : Task.CompletedTask;
         }
 
         private void OnDisable()
         {
-            var stop = lifetime;
-            lifetime = null;
-            if (stop == null) return;
+            StopAcceptingRequests();
 #if UNITY_EDITOR_WIN
             RetainLoadedLlamaLibraries();
 #endif
 
-            // Cancel on Unity's thread while the service still exists. No blocking join during teardown.
-            try
+        }
+
+        private void OnDestroy() => Application.wantsToQuit -= PrepareToQuit;
+
+        private void StopAcceptingRequests()
+        {
+            var stop = lifetime;
+            lifetime = null;
+            if (stop == null) return;
+            stop.Cancel();
+            stop.Dispose();
+        }
+
+        public void Retire()
+        {
+            // Room departure can also destroy the session's hierarchy.
+            transform.SetParent(null, true);
+            DontDestroyOnLoad(gameObject);
+            DestroyAfterDrain();
+        }
+
+        private async void DestroyAfterDrain()
+        {
+            await DrainAsync();
+            if (this != null) Destroy(gameObject);
+        }
+
+        private Task DrainAsync()
+        {
+            StopAcceptingRequests();
+            return drain ??= WaitForNativeResponse();
+        }
+
+        private async Task WaitForNativeResponse()
+        {
+            await nativeGate.WaitAsync();
+            nativeGate.Release();
+        }
+
+        private bool PrepareToQuit()
+        {
+            if (DrainAsync().IsCompleted) return true;
+            if (!retryQuit)
             {
-                if (_gate.CurrentCount == 0 && IsAgentReady(agent)) agent.CancelRequests();
-                if (_interpreterGate.CurrentCount == 0 && IsAgentReady(interpreterAgent)) interpreterAgent.CancelRequests();
+                retryQuit = true;
+                QuitAfterDrain();
             }
-            finally
-            {
-                stop.Cancel();
-                stop.Dispose();
-            }
+            return false;
+        }
+
+        private async void QuitAfterDrain()
+        {
+            await drain;
+            Application.Quit();
         }
 
         private async Task WarmupAsync(CancellationToken token)
@@ -102,9 +146,9 @@ namespace Poker.Llm.Unity
                 }
 
                 // Both agents share the native model. Prepare their first contexts in order.
-                await ChatAsync(agent, _gate, null, timeoutSeconds, token, warmup: true);
+                await ChatAsync(agent, nativeGate, null, timeoutSeconds, token, warmup: true);
                 if (UsesInterpreter && IsAgentReady(interpreterAgent))
-                    await ChatAsync(interpreterAgent, _interpreterGate, null,
+                    await ChatAsync(interpreterAgent, nativeGate, null,
                         interpreterTimeoutSeconds, token, warmup: true);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { }
@@ -143,7 +187,7 @@ namespace Poker.Llm.Unity
 
             try
             {
-                string reply = await ChatAsync(interpreterAgent, _interpreterGate,
+                string reply = await ChatAsync(interpreterAgent, nativeGate,
                     MentAnalysisPrompt.BuildInterpreterMessage(ment), interpreterTimeoutSeconds, cancellationToken);
                 return CleanInterpretation(reply);
             }
@@ -165,7 +209,7 @@ namespace Poker.Llm.Unity
             string raw;
             try
             {
-                raw = await ChatAsync(agent, _gate,
+                raw = await ChatAsync(agent, nativeGate,
                     MentAnalysisPrompt.BuildUserMessage(ment, interpretation), timeoutSeconds, cancellationToken);
             }
             catch (TimeoutException)
@@ -208,8 +252,8 @@ namespace Poker.Llm.Unity
                     return await chat;
                 }
 
-                // OnDisable cancels native requests before cancelling its lifetime token.
-                if (IsAgentReady(target) && target.isActiveAndEnabled) target.CancelRequests();
+                // Return the deadline to gameplay. Cancelling the native slot while it closes its
+                // response reader can abort the process; its bounded generation drains in finally.
                 cancellationToken.ThrowIfCancellationRequested();
                 throw new TimeoutException($"{target.name} timed out.");
             }

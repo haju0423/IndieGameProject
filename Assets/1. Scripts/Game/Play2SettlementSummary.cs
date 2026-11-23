@@ -135,7 +135,17 @@ internal static class Play2SettlementSummary
         }
         if (result.kind != (int)HoldemResultKind.Showdown) return "이번 판 결과를 정산했습니다.";
         var pots = (result.pots ?? Array.Empty<HoldemPotPacket>()).Where(pot => pot != null).ToArray();
-        if (pots.Length > 1) return "각 팟에 참여한 플레이어끼리 족보를 비교해 정산했습니다.";
+        if (pots.Length > 1)
+        {
+            var main = pots[0];
+            var payouts = (main.payouts ?? Array.Empty<HoldemPayoutPacket>()).Where(p => p != null && p.amount > 0).ToArray();
+            if (payouts.Length == 0) return "아래에서 각 팟의 분배 내역을 확인할 수 있습니다.";
+            var hand = game.seats.FirstOrDefault(s => s.seat == payouts[0].seat && IsPublicHand(s));
+            string players = string.Join(", ", payouts.Select(p => name(p.seat)));
+            string outcome = payouts.Length > 1 ? "공동 승리" : "승리";
+            string rank = hand == null ? "" : $" ({HandName(Value(hand))})";
+            return $"메인 팟 {main.amount}칩   {players} {outcome}{rank}";
+        }
         return pots.Length == 1 ? PotReason(game, pots[0]) : "공개된 최종 5장으로 승부를 결정했습니다.";
     }
 

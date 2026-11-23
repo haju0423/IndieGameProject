@@ -7,8 +7,9 @@ using UnityEngine.UIElements;
 public sealed class Play2Title : MonoBehaviour
 {
     [SerializeField] private Poker.Llm.Unity.LlmUnityMentAnalyzer hostAnalyzer;
+    private const string DealerWaitMessage = "이전 딜러 요청을 마무리하고 있습니다.";
 
-    private enum Form { Closed, Host, Join, Settings, Quit }
+    private enum Form { Closed, Host, Join, Practice, Settings, Quit }
 
     private Play2RoomSession session;
     private Form openForm;
@@ -67,11 +68,19 @@ public sealed class Play2Title : MonoBehaviour
         root.Q<Button>("join").clicked += () => OpenForm(Form.Join);
         root.Q<Button>("settings").clicked += () => OpenForm(Form.Settings);
         root.Q<Button>("quit").clicked += () => OpenForm(Form.Quit);
-        root.Q<Button>("local").clicked += () => session.StartPreview(hostAnalyzer);
+        root.Q<Button>("local").clicked += () =>
+        {
+            session.StartPreview(hostAnalyzer);
+            if (session.WaitingForDealer) OpenForm(Form.Practice);
+        };
         confirm = root.Q<Button>("confirm");
         cancel = root.Q<Button>("cancel");
         confirm.clicked += Confirm;
-        cancel.clicked += () => OpenForm(Form.Closed);
+        cancel.clicked += () =>
+        {
+            session.CancelPendingRoomStart();
+            OpenForm(Form.Closed);
+        };
         Update();
     }
 
@@ -79,7 +88,7 @@ public sealed class Play2Title : MonoBehaviour
     {
         if (session == null) return;
         bool connecting = session.IsConnecting;
-        string status = session.Status;
+        string status = session.WaitingForDealer ? DealerWaitMessage : session.Status;
         if (connecting == wasConnecting && status == lastStatus && wasReconnectAvailable == session.CanReconnect) return;
         wasConnecting = connecting;
         wasReconnectAvailable = session.CanReconnect;
@@ -87,13 +96,14 @@ public sealed class Play2Title : MonoBehaviour
         lastStatus = status;
         menu.SetEnabled(!connecting && session.State == null && openForm == Form.Closed);
         confirm.SetEnabled(!connecting && session.State == null);
-        cancel.SetEnabled(!connecting && session.State == null);
+        cancel.SetEnabled((!connecting || session.WaitingForDealer) && session.State == null);
         if (openForm == Form.Host || openForm == Form.Join)
         {
-            if (connecting) detail.text = "방에 연결하는 중...";
+            if (session.WaitingForDealer) detail.text = status;
+            else if (connecting) detail.text = "방에 연결하는 중...";
             else if (!string.IsNullOrEmpty(status)) detail.text = Poker.Online.HoldemOnlineText.ConnectionFailure(status);
         }
-        notice.text = session.CanReconnect
+        notice.text = session.WaitingForDealer ? status : session.CanReconnect
             ? connecting ? "다시 연결하는 중..." : session.ReconnectRoom + " 연결이 끊겼습니다. 다시 연결할 수 있습니다."
             : status == "HostEnded" ? "방장이 나가 방이 종료됐어요."
             : string.IsNullOrEmpty(status) ? "" : Poker.Online.HoldemOnlineText.ConnectionFailure(status);
@@ -112,17 +122,19 @@ public sealed class Play2Title : MonoBehaviour
         Show(fields, roomForm);
         Show(capacity, next == Form.Host);
         Show(settings, next == Form.Settings);
-        Show(confirm, next != Form.Settings);
+        Show(confirm, next != Form.Settings && next != Form.Practice);
         heading.text = next switch
         {
             Form.Host => "방 만들기",
             Form.Join => "방 참여",
+            Form.Practice => "혼자 연습하기",
             Form.Settings => "설정",
             _ => "게임을 종료할까요?"
         };
         confirm.text = next == Form.Host ? "방 열기" : next == Form.Join ? "참가하기" : "종료";
-        cancel.text = next == Form.Settings ? "닫기" : "뒤로";
-        detail.text = next == Form.Host ? "만든 방 코드를 친구에게 알려주세요." : "";
+        cancel.text = next == Form.Settings ? "닫기" : next == Form.Practice ? "취소" : "뒤로";
+        detail.text = next == Form.Practice ? DealerWaitMessage
+            : next == Form.Host ? "만든 방 코드를 친구에게 알려주세요." : "";
         if (roomForm)
         {
             room.value = next == Form.Host ? "OMC-" + Guid.NewGuid().ToString("N").Substring(0, 6).ToUpperInvariant() : "";

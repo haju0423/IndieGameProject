@@ -15,9 +15,16 @@ namespace Poker.Foundation.Tests
         private sealed class OpeningHandRandom : IRandomSource
         {
             private readonly System.Collections.Generic.Queue<int> swaps = new System.Collections.Generic.Queue<int>();
-            public OpeningHandRandom()
+            public OpeningHandRandom(int[] secondHand = null)
             {
                 int[] prefix = { 0, 1, 2, 48, 4, 5, 6, 49, 8, 12, 21, 30, 39, 44 };
+                QueueDeck(prefix);
+                if (secondHand == null) return;
+                swaps.Enqueue(10); // Reveal all five on the first board.
+                QueueDeck(secondHand);
+            }
+            private void QueueDeck(int[] prefix)
+            {
                 var desired = prefix.Concat(Enumerable.Range(0, 52).Except(prefix)).ToArray();
                 var deck = Enumerable.Range(0, 52).ToArray();
                 for (int i = 51; i > 0; i--)
@@ -29,6 +36,49 @@ namespace Poker.Foundation.Tests
             }
             public int NextInt(int maximum) => swaps.Count > 0 ? swaps.Dequeue() : maximum - 1;
         }
+        [Test]
+        public void FinalPlacesRetainEarlierKnockoutShareTheLastPlaceGroupAndResetOnRematch()
+        {
+            var roster = Enumerable.Range(1, 4).Select(i => new SeatId(i)).ToArray();
+            var stacks = new long[] { 8, 1, 5, 5 };
+            var ledger = ChipLedger.Create(roster.Select((seat, i) => new SeatChips(seat, stacks[i])).ToArray());
+            var config = new HoldemConfig(10, 1, 2, ante: 1, anteSteps: new long[] { 1, 8 });
+            // After seat 2 busts, seats 4, 1, 3 receive the next deal in that order.
+            var random = new OpeningHandRandom(new[] { 0, 48, 1, 4, 49, 5, 8, 12, 21, 30, 39, 44 });
+            var match = new HoldemSession(Guid.NewGuid(), config, ledger, roster, roster[0], random);
+            HoldemSnapshot PlayHand()
+            {
+                Assert.That(match.StartNextHand(Guid.NewGuid(), Guid.NewGuid(), match.Version).Accepted, Is.True);
+                var view = match.GetSnapshot(roster[0]);
+                for (int step = 0; step < 20 && view.Result == null; step++)
+                {
+                    var actor = view.CurrentSeat.Value;
+                    var action = match.GetSnapshot(actor).LegalActions.CanCheck ? BettingAction.Check() : BettingAction.Call();
+                    Assert.That(match.Submit(actor, HoldemCommand.Act(match.SessionId, view.HandId,
+                        Guid.NewGuid(), actor, match.Version, action)).Accepted, Is.True);
+                    view = match.GetSnapshot(roster[0]);
+                }
+                Assert.That(view.Result, Is.Not.Null);
+                return view;
+            }
+            var first = PlayHand();
+            Assert.That(first.IsOver, Is.False);
+            Assert.That(match.IsEliminatedAfterSettlement(roster[1]), Is.True);
+            var final = PlayHand();
+            Assert.That(final.IsOver, Is.True);
+            foreach (var observer in roster)
+            {
+                var view = match.GetSnapshot(observer);
+                Assert.That(Enumerable.Range(0, 4).Select(view.GetFinalPlaceAt), Is.EqualTo(new[] { 1, 4, 2, 2 }));
+            }
+            Assert.That(match.RestartMatch(new HoldemStartCommand(match.SessionId, Guid.NewGuid(), Guid.NewGuid(),
+                match.Version), final.HandId).Accepted, Is.True);
+            var rematch = match.GetSnapshot(roster[0]);
+            Assert.That(rematch.RoundInMatch, Is.EqualTo(1));
+            Assert.That(Enumerable.Range(0, 4).Select(rematch.GetFinalPlaceAt), Is.EqualTo(new int[4]));
+            Assert.That(Enumerable.Range(0, 4).Select(final.GetFinalPlaceAt), Is.EqualTo(new[] { 1, 4, 2, 2 }));
+        }
+
         private HoldemSnapshot ChatState => room.Read(peers[0]).Game;
         private void ChatAction(BettingAction action)
         {

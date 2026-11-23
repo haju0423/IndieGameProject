@@ -16,10 +16,8 @@ namespace Poker.Foundation
             if (cards.Count != HandSize)
                 throw new ArgumentException("A five-card hand must contain exactly five cards.", nameof(cards));
 
-            var counts = new int[(int)Rank.Ace + 1];
+            Span<Card> five = stackalloc Card[HandSize];
             ulong seenCards = 0;
-            Suit firstSuit = default;
-            bool flush = true;
             for (int i = 0; i < HandSize; i++)
             {
                 Card card = cards[i];
@@ -29,14 +27,27 @@ namespace Poker.Foundation
                 if ((seenCards & bit) != 0)
                     throw new ArgumentException("The hand contains a duplicate card.", nameof(cards));
                 seenCards |= bit;
-                counts[(int)card.Rank]++;
-                if (i == 0) firstSuit = card.Suit;
-                else if (card.Suit != firstSuit) flush = false;
+                five[i] = card;
+            }
+            return RankFive(five);
+        }
+
+        // Both public entry points validate their input once before comparing subsets.
+        internal static HandValue RankFive(ReadOnlySpan<Card> five)
+        {
+            Span<int> counts = stackalloc int[(int)Rank.Ace + 1];
+            counts.Clear();
+            bool flush = true;
+            Suit firstSuit = five[0].Suit;
+            for (int i = 0; i < HandSize; i++)
+            {
+                counts[(int)five[i].Rank]++;
+                if (five[i].Suit != firstSuit) flush = false;
             }
 
             // Walk ranks, not the caller's list. All priority lists are descending.
-            var descending = new int[HandSize];
-            var singles = new int[HandSize];
+            Span<int> descending = stackalloc int[HandSize];
+            Span<int> singles = stackalloc int[HandSize];
             int sortedCount = 0, singleCount = 0, distinctCount = 0;
             int four = 0, three = 0, highPair = 0, lowPair = 0;
             for (int rank = (int)Rank.Ace; rank >= (int)Rank.Two; rank--)

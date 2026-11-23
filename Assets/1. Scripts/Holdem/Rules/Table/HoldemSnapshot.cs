@@ -136,6 +136,8 @@ namespace Poker.Foundation
     {
         private readonly Card[] board;
         private readonly HoldemSeatView[] seats;
+        private readonly int[] matchPlaces;
+        public int GetFinalPlaceAt(int tableIndex) => matchPlaces?[tableIndex] ?? 0;
         private readonly HoldemAccusationOutcome[] accusationOutcomes;
 
         internal HoldemSnapshot(Guid sessionId, long sessionVersion, long handNumber,
@@ -143,7 +145,7 @@ namespace Poker.Foundation
             SeatId? sessionWinnerSeat, SeatId? compatibilityBustedSeat,
             SeatId[] roster, ChipLedger baseRosterLedger, HoldemHand hand, SeatId viewer,
             HoldemAccusationView accusations = null, HoldemDealWindow pendingDeal = null,
-            FixedBettingView fixedBetting = null, HoldemAccusationOutcome[] accusationOutcomes = null, long roundInMatch = 0)
+            FixedBettingView fixedBetting = null, HoldemAccusationOutcome[] accusationOutcomes = null, long roundInMatch = 0, int[] ownedFinalPlaces = null)
         {
             if (hand == null) throw new ArgumentNullException(nameof(hand));
             if (roster == null) throw new ArgumentNullException(nameof(roster));
@@ -152,6 +154,7 @@ namespace Poker.Foundation
             SessionId = sessionId;
             SessionVersion = sessionVersion;
             HandNumber = handNumber;
+            matchPlaces = ownedFinalPlaces;
             RoundInMatch = roundInMatch == 0 ? handNumber : roundInMatch;
             ButtonPolicy = buttonPolicy;
             CanContinue = canContinue;

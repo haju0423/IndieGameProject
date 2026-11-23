@@ -98,6 +98,22 @@ namespace Poker.Foundation.Tests
         }
 
         [Test]
+        public void EqualValueKickersKeepTheBoardCardInTheDisplayedFive()
+        {
+            var board = Parse("As Ah Ac Ad Kh");
+            var pocket = Parse("Kc Kd");
+            var hand = HoldemBestHand.Evaluate(board, pocket);
+            Assert.That(HoldemBestHand.EvaluateValue(board, pocket), Is.EqualTo(hand.Value));
+            Assert.That(hand.GetBestCard(4), Is.EqualTo(board[4]));
+
+            // The result remains the five cards selected at showdown.
+            var kingOfHearts = board[4];
+            board[4] = pocket[0];
+            Assert.That(hand.GetBestCard(4), Is.EqualTo(kingOfHearts));
+            Assert.Throws<ArgumentException>(() => HoldemBestHand.EvaluateValue(board, pocket));
+        }
+
+        [Test]
         public void DefaultHandValueCannotBeRanked()
         {
             HandValue value = default;

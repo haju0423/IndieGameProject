@@ -9,14 +9,29 @@ namespace Poker.Application
         BettingAction Choose(HoldemSnapshot view, IRandomSource random);
     }
 
+    public enum PracticeStyle { Balanced, Pressure, Selective }
+
     /// <summary>Local poker opponent, not an LLM. Samples unknown cards from its own perspective only.</summary>
     public sealed class HoldemNpcPolicy : IHoldemOpponentPolicy
     {
         private readonly int samples;
-        public HoldemNpcPolicy(int samples = 48)
+        private readonly double valueEdge, callMargin;
+        private readonly int bluffChance;
+        private readonly decimal betFraction;
+
+        public HoldemNpcPolicy(int samples = 48) : this(samples, PracticeStyle.Balanced) { }
+
+        public HoldemNpcPolicy(int samples, PracticeStyle style)
         {
             if (samples < 1 || samples > 512) throw new ArgumentOutOfRangeException(nameof(samples));
             this.samples = samples;
+            (valueEdge, callMargin, bluffChance, betFraction) = style switch
+            {
+                PracticeStyle.Pressure => (.10, .08, 9, .75m),
+                PracticeStyle.Selective => (.23, .04, 3, .60m),
+                PracticeStyle.Balanced => (.16, .10, 5, .50m),
+                _ => throw new ArgumentOutOfRangeException(nameof(style))
+            };
         }
 
         public BettingAction Choose(HoldemSnapshot view, IRandomSource random)
@@ -29,13 +44,14 @@ namespace Poker.Application
             double odds = legal.CanCall ? legal.CallAmount / ((double)view.PotAmount + legal.CallAmount) : 0;
             int roll = Next(random, 100);
             int contenders = CountOpponents(view) + 1;
-            double valueThreshold = Math.Max(0.38, 1.0 / contenders + 0.16);
+            bool facingLargeRaise = legal.CanCall && view.OwnStreetContribution > 0 && odds >= .25;
+            double valueThreshold = Math.Max(0.34, 1.0 / contenders + valueEdge) + (facingLargeRaise ? .08 : 0);
             bool valueBet = equity >= valueThreshold && roll < 78;
-            bool smallBluff = roll < 5 && (!legal.CanCall || odds < 0.18);
+            bool smallBluff = roll < bluffChance / Math.Max(1, contenders - 1) && (!legal.CanCall || odds < 0.18);
             if ((legal.CanBet || legal.CanRaise) && (valueBet || smallBluff))
             {
                 decimal afterCall = (decimal)view.PotAmount + legal.CallAmount;
-                decimal desired = view.OwnStreetContribution + (decimal)legal.CallAmount + decimal.Floor(afterCall / 2m);
+                decimal desired = view.OwnStreetContribution + (decimal)legal.CallAmount + decimal.Floor(afterCall * betFraction);
                 long target = legal.MinimumAggressiveTarget.HasValue
                     ? (long)Math.Max(legal.MinimumAggressiveTarget.Value,
                         Math.Min(legal.MaximumAggressiveTarget.Value, desired))
@@ -43,7 +59,7 @@ namespace Poker.Application
                 return legal.CanBet ? BettingAction.BetTo(target) : BettingAction.RaiseTo(target);
             }
             if (legal.CanCheck) return BettingAction.Check();
-            if (legal.CanCall && (equity + 0.10 >= odds || !legal.CanFold)) return BettingAction.Call();
+            if (legal.CanCall && (equity + (facingLargeRaise ? 0 : callMargin) >= odds || !legal.CanFold)) return BettingAction.Call();
             if (legal.CanFold) return BettingAction.Fold();
             throw new InvalidOperationException("No supported legal opponent action.");
         }
@@ -66,9 +82,10 @@ namespace Poker.Application
             int opponents = CountOpponents(view);
             if (opponents == 0) return 1;
             double score = 0;
+            var shuffled = new Card[population.Length];
             for (int trial = 0; trial < samples; trial++)
             {
-                var shuffled = (Card[])population.Clone();
+                Array.Copy(population, shuffled, population.Length);
                 int needed = 2 * opponents + 5 - view.BoardCount;
                 for (int i = 0; i < needed; i++)
                 {
@@ -76,12 +93,12 @@ namespace Poker.Application
                     Card swap = shuffled[i]; shuffled[i] = shuffled[pick]; shuffled[pick] = swap;
                 }
                 for (int i = view.BoardCount; i < 5; i++) board[i] = shuffled[2 * opponents + i - view.BoardCount];
-                HandValue ownValue = HoldemBestHand.Evaluate(board, own).Value;
+                HandValue ownValue = HoldemBestHand.EvaluateValue(board, own);
                 bool beaten = false; int tied = 1;
                 for (int otherIndex = 0; otherIndex < opponents; otherIndex++)
                 {
                     other[0] = shuffled[2 * otherIndex]; other[1] = shuffled[2 * otherIndex + 1];
-                    int comparison = ownValue.CompareTo(HoldemBestHand.Evaluate(board, other).Value);
+                    int comparison = ownValue.CompareTo(HoldemBestHand.EvaluateValue(board, other));
                     if (comparison < 0) { beaten = true; break; }
                     if (comparison == 0) tied++;
                 }
