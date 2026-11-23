@@ -64,7 +64,7 @@ namespace Poker.Foundation
         {
             EnsureValid();
             other.EnsureValid();
-            int comparison = Category.CompareTo(other.Category);
+            int comparison = ((int)Category).CompareTo((int)other.Category);
             if (comparison != 0) return comparison;
             for (int i = 0; i < TieBreakerCount; i++)
             {

@@ -285,6 +285,8 @@ namespace Poker.Application
     public sealed class HoldemSeatPacket
     {
         public int seat, tableIndex, status;
+        // Zero on earlier packets and until the match is settled.
+        public int finalPlace;
         public bool viewer, dealtIn, button, smallBlind, bigBlind, currentActor;
         public long stack, committed, streetContribution, awarded;
         public int[] visibleCards, revealedBestCards;
@@ -675,6 +677,7 @@ namespace Poker.Application
                 packet.seats[i] = new HoldemSeatPacket
                 {
                     seat = s.Seat.Value, tableIndex = s.TableIndex, status = (int)s.Status, viewer = s.IsViewer,
+                    finalPlace = source.GetFinalPlaceAt(i),
                     dealtIn = s.WasDealtIn, button = s.IsButton, smallBlind = s.IsSmallBlind, bigBlind = s.IsBigBlind,
                     currentActor = s.IsCurrentActor, stack = s.Stack, committed = s.Committed,
                     streetContribution = s.StreetContribution, awarded = s.Awarded,

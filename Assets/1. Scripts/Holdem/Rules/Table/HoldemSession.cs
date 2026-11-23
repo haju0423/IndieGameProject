@@ -208,6 +208,7 @@ namespace Poker.Foundation
         private readonly IRandomSource random;
         private readonly SeatId[] roster;
         private readonly SeatId initialButton;
+        private readonly int[] previousPlaces;
         private readonly HoldemOddChipRule oddChipRule;
         private readonly ChipLedger initialLedger;
         private readonly Dictionary<Guid, AcceptedCommand> accepted = new Dictionary<Guid, AcceptedCommand>();
@@ -251,6 +252,7 @@ namespace Poker.Foundation
             if (startingLedger == null) throw new ArgumentNullException(nameof(startingLedger));
             ValidateRule(oddChipRule);
             roster = HoldemSeatOrder.CopyTable(seatsInTableOrder);
+            previousPlaces = new int[roster.Length];
             if (startingLedger.SeatCount != roster.Length || startingLedger.TotalCommitted != 0)
                 throw new ArgumentException("The starting ledger must contain the full uncommitted roster.", nameof(startingLedger));
             for (int i = 0; i < roster.Length; i++) startingLedger.GetChips(roster[i]);
@@ -362,6 +364,9 @@ namespace Poker.Foundation
                 var nextLedger = candidate.IsComplete ? MergeSettled(candidate, baseLedger) : baseLedger;
                 var receipt = new HoldemReceipt(SessionId, command.HandId, command.CommandId,
                     null, nextVersion, HoldemCommandError.None);
+                // Freeze the previous hand's eliminations only after this start has succeeded.
+                if (rematch) Array.Clear(previousPlaces, 0, previousPlaces.Length);
+                else if (currentHand != null) RecordPlaces(previousPlaces);
                 currentHand = candidate;
                 accusations = nextWindow;
                 pendingDeal = nextDeal;
@@ -674,10 +679,27 @@ namespace Poker.Foundation
             SeatId? compatibilityBusted = null;
             if (roster.Length == 2 && IsOver)
                 compatibilityBusted = settledLedger.GetChips(roster[0]).Stack == 0 ? roster[0] : roster[1];
+            int[] places = null;
+            if (IsOver)
+            {
+                places = (int[])previousPlaces.Clone();
+                RecordPlaces(places);
+            }
             return new HoldemSnapshot(SessionId, Version, HandNumber, ButtonPolicy,
                 CanContinue, IsOver, SessionWinnerSeat, compatibilityBusted,
                 roster, settledLedger, currentHand, viewer, currentHand.IsRevealPending ? accusations?.ForViewer(viewer) : null, pendingDeal,
-                FixedBettingForViewer(viewer), accusationOutcomes, roundInMatch);
+                FixedBettingForViewer(viewer), accusationOutcomes, roundInMatch, places);
+        }
+
+        private void RecordPlaces(int[] places)
+        {
+            int remaining = FundedSeatCount;
+            for (int i = 0; i < roster.Length; i++)
+            {
+                if (!currentHand.WasDealtIn(roster[i])) continue;
+                if (IsEliminatedAfterSettlement(roster[i])) places[i] = remaining + 1;
+                else if (remaining == 1) places[i] = 1;
+            }
         }
 
         private SeatId ResolveNextButton()

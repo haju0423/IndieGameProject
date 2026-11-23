@@ -25,16 +25,17 @@ internal sealed class Play2HandGuide
     private readonly TextMeshProUGUI summary, cards;
     private readonly RectTransform panel, legend, overlay;
     private bool expanded, actionPickerOpen;
+    internal RectTransform HelpButton { get; }
     internal bool IsOpen => expanded && !actionPickerOpen;
     private readonly UnityEngine.UI.Image[] rankBackgrounds = new UnityEngine.UI.Image[Ranks.Length];
     private string handId;
     private int[] holeCards = Array.Empty<int>(), board = Array.Empty<int>();
     private int rankIndex = -1;
 
-    internal Play2HandGuide(RectTransform parent, TMP_FontAsset font)
+    internal Play2HandGuide(RectTransform parent, RectTransform screen, TMP_FontAsset font)
     {
-        panel = Play2HudArt.Plate("My Hand", parent, new Vector2(90, 56), new Vector2(202, 85), "PlayingBadge");
-        panel.anchorMin = panel.anchorMax = new Vector2(.5f, 0);
+        panel = Play2HudArt.Plate("My Hand", parent, new Vector2(0, 56), new Vector2(202, 85), "PlayingBadge");
+        panel.anchorMin = panel.anchorMax = new Vector2(.33f, 0);
         panel.GetComponent<UnityEngine.UI.Image>().color = Play2UGui.Hex("10191CBF");
         panel.SetAsFirstSibling();
         Play2HudArt.Clickable(panel, Toggle);
@@ -44,8 +45,9 @@ internal sealed class Play2HandGuide
         Play2HudArt.Fit(summary, 16);
         var help = Play2HudArt.Button("Hand Help", parent, "족보 ?", new Vector2(-131, -32), new Vector2(80, 34),
             "PlayingBadge", Play2UGui.Cream, font, Toggle, 16);
-        help.GetComponent<RectTransform>().anchorMin = help.GetComponent<RectTransform>().anchorMax = Vector2.one;
-        overlay = Play2UGui.Fill("Hand Guide Overlay", parent);
+        HelpButton = help.GetComponent<RectTransform>();
+        HelpButton.anchorMin = HelpButton.anchorMax = Vector2.one;
+        overlay = Play2UGui.Fill("Hand Guide Overlay", screen);
         Play2UGui.Image(overlay, new Color(0, 0, 0, .28f), true);
         legend = Play2HudArt.Plate("Hand Rankings", overlay, Vector2.zero, new Vector2(480, 552), "PinePanel", true);
         legend.GetComponent<UnityEngine.UI.Image>().color = Play2UGui.Hex("152124FF");
@@ -114,9 +116,10 @@ internal sealed class Play2HandGuide
         if (IsOpen) overlay.SetAsLastSibling();
     }
 
-    internal void Present(HoldemRoomPacket packet, bool dealing)
+    internal void Present(HoldemRoomPacket packet, bool dealing, bool portrait = false)
     {
         var game = packet.game;
+        panel.gameObject.SetActive(!portrait && !(dealing && game.board.Length == 0 && !game.hasResult));
         if (handId != game.handId)
         {
             handId = game.handId;

@@ -88,6 +88,15 @@ public sealed partial class Play2FingerRig : MonoBehaviour
             * Quaternion.Inverse(Quaternion.LookRotation(length, normal));
     }
 
+    internal Vector3 FingerPad(bool left, int finger, Transform wrist) =>
+        wrist.InverseTransformPoint(Pad(hands[left ? 0 : 1][finger]));
+
+    internal Vector3 PushContact(bool left)
+    {
+        var hand = hands[left ? 0 : 1];
+        return (hand[1].Bend + hand[2].Bend + hand[3].Bend) / 3f;
+    }
+
     internal Quaternion ThumbsDownRotation(bool left, Vector3 palmNormal)
     {
         var hand = hands[left ? 0 : 1];
@@ -165,6 +174,94 @@ public sealed partial class Play2FingerRig : MonoBehaviour
         SetFingerCurl(left, 1, 0.27f * amount);
         for (int i = 2; i < FingerCount(left); i++)
             SetFingerCurl(left, i, (0.55f + (i - 2) * 0.21f) * amount);
+    }
+
+    internal void PinchPacket(bool left, Transform wrist, float weight, float scale)
+    {
+        // Pad centres sit just outside the two printed faces. The thumb travels further than the index.
+        if (weight <= 0f) return;
+        var hand = hands[left ? 0 : 1];
+        var thumb = hand[0];
+        var index = hand[1];
+        for (int i = 2; i < hand.Length; i++)
+        {
+            float heldCurl = left ? 1.06f + (i - 2) * .18f : 1.53f + (i - 2) * .23f;
+            hand[i].Curl(Mathf.Lerp(.55f + (i - 2) * .21f, heldCurl, weight));
+        }
+        Vector3 a = Pad(thumb), b = Pad(index);
+        Vector3 axis = a - b;
+        float spacing = .015f + .0035f * scale;
+        if (axis.sqrMagnitude <= spacing * spacing) return;
+        Vector3 middle = Vector3.Lerp(a, b, .66f);
+        Vector3 half = axis.normalized * (spacing * .5f);
+        // Bring the pinch within reach of both knuckles before bending the two digits.
+        // The owl and bull have much wider thumb bases than the other two hands.
+        Vector3 thumbBase = thumb.Proximal.position - half;
+        Vector3 indexBase = index.Proximal.position + half;
+        float thumbReach = PinchReach(thumb, a);
+        float indexReach = PinchReach(index, b);
+        for (int pass = 0; pass < 3; pass++)
+        {
+            middle = thumbBase + Vector3.ClampMagnitude(middle - thumbBase, thumbReach);
+            middle = indexBase + Vector3.ClampMagnitude(middle - indexBase, indexReach);
+        }
+        Play2TableArm.ReachPoint(thumb.Proximal, thumb.Distal, a, Vector3.Lerp(a, middle + half, weight));
+        Play2TableArm.ReachPoint(index.Proximal, index.Distal, b, Vector3.Lerp(b, middle - half, weight));
+        if (!left)
+        {
+            // Two fingers support the lower back of the fan; the pinky can rest against the palm.
+            Vector3 up = Vector3.ProjectOnPlane(wrist.TransformDirection(hand[2].Tip - hand[2].Base), axis).normalized;
+            Vector3 across = Vector3.Cross(up, axis.normalized);
+            for (int i = 2; i <= 3; i++)
+            {
+                var digit = hand[i];
+                Vector3 pad = Pad(digit);
+                Vector3 support = middle - half + scale * (across * (.013f * (i - 1)) + up * (.012f - .009f * (i - 2)));
+                Vector3 shift = Vector3.ClampMagnitude(support - pad, .028f) * weight;
+                Play2TableArm.ReachPoint(digit.Proximal, digit.Distal, pad, pad + shift);
+            }
+        }
+    }
+
+    internal void PressCardBack(Vector3 target, float weight)
+    {
+        var index = hands[0][1];
+        Vector3 pad = Pad(index);
+        Vector3 end = pad + Vector3.ClampMagnitude(target - pad, .055f) * weight;
+        Play2TableArm.ReachPoint(index.Proximal, index.Distal, pad, end, Vector3.up, weight);
+    }
+
+    internal void SupportFan(Vector3 pinch, Quaternion fan, float scale, float weight)
+    {
+        Vector3 right = fan * Vector3.right;
+        Vector3 normal = fan * Vector3.up;
+        Vector3 top = fan * Vector3.forward;
+        // Stagger the contact points along the packet. A thumb and index pressed
+        // tip to tip at a single point look as if they punch through both cards.
+        for (int i = 0; i < hands[0].Length; i++)
+        {
+            var finger = hands[0][i];
+            Vector3 pad = Pad(finger);
+            float across, height, depth;
+            if (i == 0) { across = .005f; height = .003f; depth = .010f; }
+            else
+            {
+                across = .007f * (i - 1);
+                height = .007f - .012f * (i - 1);
+                float padLength = Vector3.Distance(finger.Distal.position, pad);
+                float clearance = 1.5f * Mathf.Max(0f, padLength - .026f) / scale;
+                depth = (i == 1 ? -.016f : -.023f) - clearance;
+            }
+            Vector3 target = pinch + scale * (right * across + top * height + normal * depth);
+            Vector3 shift = Vector3.ClampMagnitude(target - pad, .055f);
+            Play2TableArm.ReachPoint(finger.Proximal, finger.Distal, pad, pad + shift * weight, normal, weight);
+        }
+    }
+
+    private static float PinchReach(Finger digit, Vector3 pad)
+    {
+        return .95f * (Vector3.Distance(digit.Proximal.position, digit.Distal.position)
+            + Vector3.Distance(digit.Distal.position, pad));
     }
 
     internal Pose CardContact(bool left, Transform wrist)
