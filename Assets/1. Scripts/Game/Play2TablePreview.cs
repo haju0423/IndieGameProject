@@ -7,6 +7,7 @@ using MoreMountains.Tools;
 using Poker.Application;
 using Poker.Transport;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using HoldemSeatStatus = Poker.Foundation.HoldemSeatStatus;
 
 public sealed class Play2TablePreview : MonoBehaviour
@@ -44,6 +45,7 @@ public sealed class Play2TablePreview : MonoBehaviour
     [SerializeField] private Material requestMarkerMaterial;
     [SerializeField] private Material chipMaterial;
     [SerializeField] private Play2FrontEnd frontEnd;
+    [SerializeField] private GameObject[] emoteCharacters;
 
     private const float BoardScale = 1.82f, BoardTilt = 18f, BoardZ = -.045f;
     private static float BoardEdgeRise => .060f * BoardScale * Mathf.Sin(BoardTilt * Mathf.Deg2Rad);
@@ -82,15 +84,24 @@ public sealed class Play2TablePreview : MonoBehaviour
     private Play2TableAtmosphere atmosphere;
     private Material cardFaceMaterial, boardFaceMaterial, curvedPaper;
     private readonly Play2FaceContact[] faces = new Play2FaceContact[4];
+    private readonly Transform[] heads = new Transform[4];
+    private readonly Quaternion?[] headBeforeLook = new Quaternion?[4];
+    private const float RemoteLookSmoothTime = .14f;
+    private readonly float[] seatLookYaw = new float[4];
+    private readonly float[] seatLookVelocity = new float[4];
+    private float lookYaw;
+    private bool looking;
+    private Play2TableEmotes emotes;
+    private Transform SeatEye => eyes[Mathf.Max(0, viewer - 1)];
     internal float BoardTopViewportY => seatCamera.WorldToViewportPoint(tabletop.position
-        + Vector3.ProjectOnPlane(seatCamera.transform.forward, Vector3.up).normalized
+        + Vector3.ProjectOnPlane(SeatEye.forward, Vector3.up).normalized
             * (BoardZ + .060f * BoardScale * Mathf.Cos(BoardTilt * Mathf.Deg2Rad))
         + Vector3.up * (.004f + 2f * BoardEdgeRise)).y;
     internal Vector3 TableCenter => tabletop.position;
     internal Vector3 PlayerLabelViewport(int seat)
     {
         if (faces[seat - 1].TryLabelPoint(seatCamera, out var point)) return point;
-        var head = players[seat - 1].GetComponent<Animator>().GetBoneTransform(HumanBodyBones.Head);
+        var head = heads[seat - 1];
         return seatCamera.WorldToViewportPoint(head.position + Vector3.up * .23f);
     }
     private Transform deck;
@@ -102,6 +113,7 @@ public sealed class Play2TablePreview : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (chips == null) return;
         if (finale?.InGroup == true)
         {
             if (!groupStarted)
@@ -143,7 +155,8 @@ public sealed class Play2TablePreview : MonoBehaviour
                 * (1f - Mathf.SmoothStep(0, 1, (pushTime - .64f) / .58f)));
             seatCamera.transform.SetPositionAndRotation(eye.position + behind * (.12f - .21f * lean - .090f * peek)
                 + Vector3.up * (.035f + .11f * lift + .045f * lean - .055f * peek),
-                eye.rotation * Quaternion.Euler(3.5f * lift - lean + 6f * peek, 0f, 0f));
+                Quaternion.AngleAxis(lookYaw, Vector3.up) * eye.rotation
+                * Quaternion.Euler(3.5f * lift - lean + 6f * peek, 0f, 0f));
         }
         if (seatCamera.pixelHeight > 0) seatCamera.aspect = (float)seatCamera.pixelWidth / seatCamera.pixelHeight;
         float aspect = Mathf.Min(seatCamera.aspect, 16f / 9f);
@@ -159,6 +172,27 @@ public sealed class Play2TablePreview : MonoBehaviour
         if (Showdown is ShowdownBeat.Award or ShowdownBeat.Finished) LiftWinningCards();
         reactions?.Animate();
         chips?.UpdateHands();
+        for (int i = 0; i < heads.Length; i++)
+        {
+            if (i + 1 == viewer)
+            {
+                seatLookYaw[i] = lookYaw;
+                continue;
+            }
+            if (!players[i].activeInHierarchy || heads[i] == null)
+            {
+                seatLookYaw[i] = seatLookVelocity[i] = 0f;
+                continue;
+            }
+            if (Time.unscaledDeltaTime > 0f)
+                seatLookYaw[i] = Mathf.SmoothDampAngle(seatLookYaw[i], session.ReadLook(i + 1), ref seatLookVelocity[i],
+                    RemoteLookSmoothTime, Mathf.Infinity, Time.unscaledDeltaTime);
+            if (Mathf.Approximately(seatLookYaw[i], 0f) || reactions.PlayingReaction(i)) continue;
+            var head = heads[i];
+            headBeforeLook[i] = head.localRotation;
+            head.rotation = Quaternion.AngleAxis(seatLookYaw[i], Vector3.up) * head.rotation;
+        }
+        emotes?.Animate(viewer, seatLookYaw, chips, reactions);
         frontEnd.AlignTableLabels();
     }
 
@@ -188,8 +222,9 @@ public sealed class Play2TablePreview : MonoBehaviour
         for (int i = 0; i < players.Length; i++)
         {
             var animator = players[i].GetComponent<Animator>();
+            heads[i] = animator.GetBoneTransform(HumanBodyBones.Head);
             faces[i] = new Play2FaceContact(players[i].GetComponentInChildren<SkinnedMeshRenderer>(true),
-                animator.GetBoneTransform(HumanBodyBones.Head));
+                heads[i]);
             postures[i] = new Play2AllInPosture(animator);
             chairs[i] = GameObject.Find("Table Chair " + (i + 1))?.GetComponent<MeshRenderer>();
         }
@@ -215,7 +250,18 @@ public sealed class Play2TablePreview : MonoBehaviour
         }
         frontEnd.Initialize(this);
         reactions = new Play2TableReactions(this, players, eyes, seatCamera, frontEnd.HudRoot, frontEnd.Font, chips);
+        if (emoteCharacters?.Length == players.Length)
+        {
+            emotes = new Play2TableEmotes(players, emoteCharacters, eyes, transform, seatCamera.transform, frontEnd.HudCanvas,
+                frontEnd.Font, index => session.SendEmote(index + 1, Mathf.RoundToInt(lookYaw)));
+            session.EmoteReceived += PlayEmote;
+        }
         SetState(session.State);
+    }
+
+    private void PlayEmote(int seat, int emote, int _)
+    {
+        if (state?.game?.hasResult == false && !finale.Active) emotes.Play(seat, emote, viewer);
     }
 
     internal bool WatchingPractice => session != null && session.WatchingPractice;
@@ -240,6 +286,14 @@ public sealed class Play2TablePreview : MonoBehaviour
     private void Update()
     {
         if (session == null) return;
+        emotes?.Restore();
+        // Remove last frame's presentation offset before the Animator evaluates.
+        for (int i = 0; i < heads.Length; i++)
+            if (headBeforeLook[i] is Quaternion rest)
+            {
+                heads[i].localRotation = rest;
+                headBeforeLook[i] = null;
+            }
         finale?.RestoreGaze();
         chips?.RestoreFlinch();
         foreach (var pose in postures) pose?.Restore();
@@ -249,10 +303,22 @@ public sealed class Play2TablePreview : MonoBehaviour
             && !frontEnd.WaitingForSpectatorRequest() && session.PlayPreviewOpponent())
             nextPreviewAction = Time.time + 0.65f;
         bool chatHasInput = frontEnd.CaptureChatInput();
-        bool reactionOpen = !chatHasInput && !finale.InGroup && reactions.HandlePointer();
-        frontEnd.Present(state, session.Status, chatHasInput || reactionOpen);
-        var mouse = UnityEngine.InputSystem.Mouse.current;
-        if (!chatHasInput && !IsDealing && state?.game?.hasResult != true && mouse?.leftButton.wasPressedThisFrame == true
+        bool wheelOpen = emotes?.TickWheel(!chatHasInput && !reactions.IsOpen && !finale.Active
+            && state?.game?.hasResult == false && frontEnd.CanOpenEmotes) == true;
+        bool reactionOpen = !chatHasInput && !wheelOpen && !finale.InGroup && reactions.HandlePointer();
+        frontEnd.Present(state, session.Status, chatHasInput || reactionOpen || wheelOpen);
+        var mouse = Mouse.current;
+        if (mouse == null || !mouse.rightButton.isPressed || !Application.isFocused || !frontEnd.CanLookAround
+            || chatHasInput || reactionOpen || wheelOpen || finale.Active || state?.hasGame != true)
+            looking = false;
+        else if (mouse.rightButton.wasPressedThisFrame)
+            looking = seatCamera.pixelRect.Contains(mouse.position.ReadValue())
+                && UnityEngine.EventSystems.EventSystem.current?.IsPointerOverGameObject() != true;
+        else if (looking)
+            lookYaw = Mathf.Clamp(lookYaw + mouse.delta.ReadValue().x * .18f, -Poker.Online.FusionClient.MaxLookYaw,
+                Poker.Online.FusionClient.MaxLookYaw);
+        session.SendLook(finale.Active ? 0 : Mathf.RoundToInt(lookYaw));
+        if (!chatHasInput && !wheelOpen && !IsDealing && state?.game?.hasResult != true && mouse?.leftButton.wasPressedThisFrame == true
             && UnityEngine.EventSystems.EventSystem.current?.IsPointerOverGameObject() != true
             && seatCamera.pixelRect.Contains(mouse.position.ReadValue())
             && viewer > 0 && grips[viewer - 1] != null && grips[viewer - 1].Contains(mouse.position.ReadValue(), seatCamera))
@@ -283,6 +349,9 @@ public sealed class Play2TablePreview : MonoBehaviour
         {
             ClearCards();
             viewer = viewerSeat;
+            lookYaw = 0f;
+            Array.Clear(seatLookYaw, 0, seatLookYaw.Length);
+            Array.Clear(seatLookVelocity, 0, seatLookVelocity.Length);
             var eye = eyes[viewer - 1];
             seatCamera.transform.SetPositionAndRotation(eye.position, eye.rotation);
             seatCamera.transform.position += -Vector3.ProjectOnPlane(eye.forward, Vector3.up).normalized * .20f + Vector3.up * .035f;
@@ -291,6 +360,7 @@ public sealed class Play2TablePreview : MonoBehaviour
         var game = state?.hasGame == true ? state.game : null;
         bool sameHand = game != null && previous?.hasGame == true && previous.sessionId == packet.sessionId
             && game.handId == previous.game.handId && viewerSeat == previous.viewerSeat;
+        if (!sameHand || (game?.hasResult == true && previous?.game?.hasResult != true)) emotes?.Reset();
         if (!sameHand)
         {
             finale.Reset();
@@ -501,7 +571,7 @@ public sealed class Play2TablePreview : MonoBehaviour
         SetCardValue(card, cardId);
 
         var pose = card.transform;
-        Quaternion boardFacing = Quaternion.Euler(0f, seatCamera.transform.eulerAngles.y, 0f);
+        Quaternion boardFacing = Quaternion.Euler(0f, SeatEye.eulerAngles.y, 0f);
         // Rest the near edge on the felt and raise the far edge towards this seat.
         Quaternion shown = boardFacing * Quaternion.Euler(-BoardTilt, 0, 0);
         Vector3 end = boardFacing * new Vector3((index - 2) * .164f, .004f + BoardEdgeRise, BoardZ);
@@ -590,6 +660,8 @@ public sealed class Play2TablePreview : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (session != null) session.EmoteReceived -= PlayEmote;
+        emotes?.Dispose();
         SetFirstPersonChair(null);
         reactions?.Release();
     }

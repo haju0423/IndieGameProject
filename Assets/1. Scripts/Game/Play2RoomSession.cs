@@ -10,7 +10,7 @@ public sealed class Play2RoomSession : MonoBehaviour
 {
     internal const string TitleScene = "Title";
     internal const string LobbyScene = "Lobby";
-    internal const string GameScene = "InGame";
+    internal const string GameScene = "InGame 1";
 
     internal static Play2RoomSession Current { get; private set; }
 
@@ -32,6 +32,7 @@ public sealed class Play2RoomSession : MonoBehaviour
     private HoldemWireRequest pendingAction;
     private bool actionAccepted;
     internal event Action<HoldemWireResponse> ChatReceived;
+    internal event Action<int, int, int> EmoteReceived;
 
     internal HoldemRoomPacket State => state;
     internal string Status => status;
@@ -48,6 +49,13 @@ public sealed class Play2RoomSession : MonoBehaviour
     internal bool ChatDraftToDealer { get; set; }
     internal bool ChatDeliveryUnconfirmed { get; set; }
     internal bool ActionPending => pendingAction != null;
+    internal void SendLook(int yaw) => online?.SendLook(yaw);
+    internal int ReadLook(int seat) => online?.ReadLook(seat) ?? 0;
+    internal void SendEmote(int emote, int yaw)
+    {
+        if (online != null) online.SendEmote(emote, yaw);
+        else if (IsLocal && state?.game?.hasResult == false) EmoteReceived?.Invoke(state.viewerSeat, emote, yaw);
+    }
 
     internal static Play2RoomSession GetOrCreate()
     {
@@ -281,6 +289,7 @@ public sealed class Play2RoomSession : MonoBehaviour
         connecting = true;
         status = "";
         var client = gameObject.AddComponent<FusionClient>();
+        client.EmoteReceived += (seat, emote, yaw) => EmoteReceived?.Invoke(seat, emote, yaw);
         online = client;
         try
         {

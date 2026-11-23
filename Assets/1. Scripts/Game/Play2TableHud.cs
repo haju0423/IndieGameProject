@@ -44,6 +44,7 @@ internal sealed partial class Play2TableHud
     private readonly UnityEngine.UI.Button[] potButtons = new UnityEngine.UI.Button[4];
     private UnityEngine.UI.Slider amountSlider;
     internal bool CanOpenChat => packet != null && !settings.IsOpen && !handGuide.IsOpen;
+    internal bool CanOpenEmotes => !sizing.gameObject.activeSelf && !accusation.gameObject.activeSelf;
     private long WholeStack
     {
         get { var self = packet.game.seats.First(s => s.seat == packet.viewerSeat); return self.stack + self.streetContribution; }

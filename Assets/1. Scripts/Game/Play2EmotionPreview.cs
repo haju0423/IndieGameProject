@@ -11,52 +11,20 @@ public sealed class Play2EmotionPreview : MonoBehaviour
     [SerializeField] private CardVisual cardPrefab;
     [SerializeField] private TMP_FontAsset font;
 
-    private static readonly (string Label, int State)[] Emotions =
-    {
-        ("중지", Animator.StringToHash("Base Layer.SittingMiddleFingerLeft")),
-        ("가리키기", Animator.StringToHash("Base Layer.SittingPointLeft")),
-        ("손짓", Animator.StringToHash("Base Layer.SittingGestureLeft")),
-        ("질문", Animator.StringToHash("Base Layer.SittingAskQuestionLeft")),
-        ("엄지척", Animator.StringToHash("Base Layer.SittingThumbsUp")),
-        ("불신", Animator.StringToHash("Base Layer.SittingDisbelief")),
-        ("승리", Animator.StringToHash("Base Layer.SittingVictory"))
-    };
-
-    private const float DeadZone = 44f;
     private static readonly Vector3 LeftArmViewOffset = new Vector3(-.115f, .23f, .43f);
     private static readonly int SittingIdle = Animator.StringToHash("Base Layer.SittingIdle");
-    private readonly TextMeshProUGUI[] labels = new TextMeshProUGUI[Emotions.Length];
-    private Canvas canvas;
-    private GameObject wheelOverlay;
-    private Play2EmotionWheelGraphic wheel;
-    private RectTransform pointer;
-    private TextMeshProUGUI currentCharacter, centerLabel, centerHint;
+    private TextMeshProUGUI currentCharacter;
+    private Play2EmotionWheel emotionWheel;
     private CardVisual firstCard, secondCard, ownFirst, ownSecond;
     private PreviewCardGrip grip, localGrip;
     private GameObject localActor;
     private Mesh leftArmMesh;
     private SkinnedMeshRenderer leftArm;
     private Animator localAnimator, opponentAnimator;
-    private InputAction middleButton;
-    private Vector2 direction, lastMousePosition;
-    private int selected = -1;
     private int opponentIndex = -1, localIndex = -1;
     private bool previewLocal = true;
-    private bool choosing, cursorWasVisible, releasePending;
-    private Mouse wheelMouse;
 
-    private void Awake()
-    {
-        BuildInterface();
-        middleButton = new InputAction(type: InputActionType.Button, binding: "<Mouse>/middleButton");
-        middleButton.started += context =>
-        {
-            if (context.control.device is Mouse mouse) OpenWheel(mouse);
-        };
-        middleButton.canceled += _ => releasePending = choosing;
-    }
-
-    private void OnEnable() => middleButton.Enable();
+    private void Awake() => BuildInterface();
 
     private void Start()
     {
@@ -171,99 +139,25 @@ public sealed class Play2EmotionPreview : MonoBehaviour
 
     private void Update()
     {
+        if (emotionWheel.Tick(true)) return;
         var keyboard = Keyboard.current;
-        if (keyboard != null)
+        if (keyboard == null) return;
+        if (keyboard.tabKey.wasPressedThisFrame)
         {
-            if (keyboard.escapeKey.wasPressedThisFrame && choosing)
-            {
-                CloseWheel(false);
-                return;
-            }
-
-            if (!choosing)
-            {
-                if (keyboard.tabKey.wasPressedThisFrame)
-                {
-                    previewLocal = !previewLocal;
-                    UpdateTargetLabel();
-                }
-                else if (keyboard.digit1Key.wasPressedThisFrame) SelectCharacter(0);
-                else if (keyboard.digit2Key.wasPressedThisFrame) SelectCharacter(1);
-                else if (keyboard.digit3Key.wasPressedThisFrame) SelectCharacter(2);
-                else if (keyboard.digit4Key.wasPressedThisFrame) SelectCharacter(3);
-            }
+            previewLocal = !previewLocal;
+            UpdateTargetLabel();
         }
-
-        if (!choosing) return;
-        var mouse = wheelMouse;
-        if (mouse == null || !mouse.added)
-        {
-            CloseWheel(false);
-            return;
-        }
-
-        Vector2 position = mouse.position.ReadValue();
-        Vector2 movement = mouse.delta.ReadValue();
-        if (movement == Vector2.zero) movement = position - lastMousePosition;
-        lastMousePosition = position;
-        UpdateSelection(movement / canvas.scaleFactor);
-        if (releasePending) CloseWheel(true);
-        else if (!mouse.middleButton.isPressed) CloseWheel(false);
+        else if (keyboard.digit1Key.wasPressedThisFrame) SelectCharacter(0);
+        else if (keyboard.digit2Key.wasPressedThisFrame) SelectCharacter(1);
+        else if (keyboard.digit3Key.wasPressedThisFrame) SelectCharacter(2);
+        else if (keyboard.digit4Key.wasPressedThisFrame) SelectCharacter(3);
     }
 
-    private void OpenWheel(Mouse mouse)
+    private void PlayEmotion(int index)
     {
-        if (choosing) return;
-        choosing = true;
-        wheelMouse = mouse;
-        lastMousePosition = mouse.position.ReadValue();
-        releasePending = false;
-        cursorWasVisible = Cursor.visible;
-        Cursor.visible = false;
-        direction = Vector2.zero;
-        wheelOverlay.SetActive(true);
-        SetSelection(-1);
-        UpdateSelection(Vector2.zero);
-    }
-
-    private void UpdateSelection(Vector2 movement)
-    {
-        direction = Vector2.ClampMagnitude(direction + movement, Play2EmotionWheelGraphic.Radius - 14f);
-        pointer.anchoredPosition = direction;
-        pointer.gameObject.SetActive(direction.sqrMagnitude >= DeadZone * DeadZone);
-        if (direction.sqrMagnitude < DeadZone * DeadZone)
-        {
-            SetSelection(-1);
-            return;
-        }
-
-        float angle = Mathf.Repeat(Mathf.Atan2(direction.x, direction.y) * Mathf.Rad2Deg, 360f);
-        float sector = 360f / Emotions.Length;
-        SetSelection(Mathf.FloorToInt((angle + sector * .5f) / sector) % Emotions.Length);
-    }
-
-    private void SetSelection(int index)
-    {
-        selected = index;
-        wheel.SetSelection(Emotions.Length, index);
-        for (int i = 0; i < labels.Length; i++)
-            labels[i].color = i == index ? Play2UGui.Dark : Play2UGui.Cream;
-        centerLabel.text = index < 0 ? "이모트 선택" : Emotions[index].Label;
-        centerHint.text = index < 0 ? "마우스를 움직이세요" : "휠 버튼을 떼면 재생";
-    }
-
-    private void CloseWheel(bool confirm)
-    {
-        if (!choosing) return;
-        choosing = false;
-        wheelMouse = null;
-        releasePending = false;
-        wheelOverlay.SetActive(false);
-        Cursor.visible = cursorWasVisible;
         var animator = previewLocal ? localAnimator : opponentAnimator;
-        if (!confirm || selected < 0 || animator == null) return;
-
-        int state = Emotions[selected].State;
+        if (animator == null) return;
+        int state = Animator.StringToHash("Base Layer." + Play2EmotionWheel.Motions[index]);
         if (animator.GetCurrentAnimatorStateInfo(0).fullPathHash == state)
             animator.Play(state, 0, 0f);
         else
@@ -272,20 +166,16 @@ public sealed class Play2EmotionPreview : MonoBehaviour
 
     private void OnApplicationFocus(bool focused)
     {
-        if (!focused) CloseWheel(false);
+        if (!focused) emotionWheel?.Cancel();
     }
 
-    private void OnDisable()
-    {
-        CloseWheel(false);
-        middleButton.Disable();
-    }
+    private void OnDisable() => emotionWheel?.Cancel();
 
     private void OnDestroy()
     {
         grip?.Release();
         ClearLocal();
-        middleButton.Dispose();
+        emotionWheel?.Dispose();
     }
 
     private sealed class PreviewCardGrip
@@ -392,7 +282,7 @@ public sealed class Play2EmotionPreview : MonoBehaviour
     {
         var root = new GameObject("Emotion Preview UI", typeof(RectTransform), typeof(Canvas), typeof(UnityEngine.UI.CanvasScaler));
         root.transform.SetParent(transform, false);
-        canvas = root.GetComponent<Canvas>();
+        var canvas = root.GetComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         var scaler = root.GetComponent<UnityEngine.UI.CanvasScaler>();
         scaler.uiScaleMode = UnityEngine.UI.CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -413,24 +303,6 @@ public sealed class Play2EmotionPreview : MonoBehaviour
         Play2UGui.Text("Character Controls", controls, "Tab 대상 바꾸기   ·   1~4 캐릭터 바꾸기",
             new Vector2(0f, -14f), new Vector2(375f, 24f), 15f, Play2UGui.Gold, font);
 
-        var overlay = Play2UGui.Fill("Emotion Selection", root.transform);
-        wheelOverlay = overlay.gameObject;
-        Play2UGui.Image(overlay, Play2UGui.Hex("07120F49"));
-        float size = (Play2EmotionWheelGraphic.Radius + 4f) * 2f;
-        var rim = Play2UGui.Rect("Wheel", overlay, Vector2.zero, new Vector2(size, size));
-        wheel = rim.gameObject.AddComponent<Play2EmotionWheelGraphic>();
-        wheel.raycastTarget = false;
-        for (int i = 0; i < Emotions.Length; i++)
-        {
-            var position = Play2EmotionWheelGraphic.Direction(i * 360f / Emotions.Length) * Play2EmotionWheelGraphic.LabelRadius;
-            labels[i] = Play2UGui.Text("Emotion " + i, rim, Emotions[i].Label, position, new Vector2(112f, 32f), 21f,
-                Play2UGui.Cream, font, style: FontStyles.Bold);
-        }
-
-        centerLabel = Play2UGui.Text("Selection", rim, "", new Vector2(0f, 17f), new Vector2(202f, 42f), 27f,
-            Play2UGui.Cream, font, style: FontStyles.Bold);
-        centerHint = Play2UGui.Text("Confirm", rim, "", new Vector2(0f, -20f), new Vector2(205f, 28f), 15f, Play2UGui.Gold, font);
-        pointer = Play2UGui.Diamond("Mouse Direction", rim, Vector2.zero, Play2UGui.Cream);
-        wheelOverlay.SetActive(false);
+        emotionWheel = new Play2EmotionWheel(root.transform, canvas, font, PlayEmotion);
     }
 }

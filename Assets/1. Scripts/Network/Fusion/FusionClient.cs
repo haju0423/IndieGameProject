@@ -19,6 +19,9 @@ namespace Poker.Online
     public sealed class FusionClient : MonoBehaviour, IHoldemRemoteClient, IHoldemReconnectPolicy, INetworkRunnerCallbacks
     {
         private const int Magic = 0x4f4d4331;
+        private const int LookMessage = 3;
+        private const int EmoteMessage = 4;
+        public const int MaxLookYaw = 75;
         private static readonly UTF8Encoding Utf8 = new UTF8Encoding(false, true);
         [Serializable] private sealed class Envelope
         {
@@ -27,6 +30,11 @@ namespace Poker.Online
             public string connection;
             public HoldemWireRequest request;
             public HoldemWireResponse[] replies;
+            public bool supportsLook;
+            public int lookYaw;
+            public int[] seatLooks;
+            public bool supportsEmotes;
+            public int emote, emoteSeat;
         }
         private sealed class Peer
         {
@@ -37,6 +45,10 @@ namespace Poker.Online
             public long PublishedRevision = -1;
             public int PublishedDesignationRevision;
             public long PublishedEliminatedSpeechRevision;
+            public bool SupportsLook;
+            public long PublishedLookRevision;
+            public bool SupportsEmotes;
+            public double NextEmote;
             public string Token;
             public double JoinedAt = Time.realtimeSinceStartupAsDouble;
         }
@@ -47,6 +59,12 @@ namespace Poker.Online
         private readonly SpeechHistoryAssembler speechHistory = new SpeechHistoryAssembler();
         private readonly SpeechHistoryAssembler eliminatedSpeechHistory = new SpeechHistoryAssembler(true);
         private double nextSpeechSync;
+        private readonly int[] seatLooks = new int[HoldemRoom.Capacity];
+        private bool hostSupportsLook;
+        private bool hostSupportsEmotes;
+        private int? lastSentLook = 0;
+        private double nextLookSend, nextLookPublish;
+        private long lookRevision;
         private NetworkRunner runner;
         private GameObject runnerOwner;
         private HoldemHostCommandBridge authority;
@@ -74,6 +92,7 @@ namespace Poker.Online
             || HoldemOnlineText.RequiresFreshParticipation(AdmissionError)
             || HoldemOnlineText.RequiresFreshParticipation(ConnectionError);
         public HoldemRoomPacket Latest { get; private set; }
+        public event Action<int, int, int> EmoteReceived;
         public bool IsHost => hosting;
         /// <summary>Host-process integration only. Never sent to a participant over Fusion.</summary>
         public IHoldemHostDealerPort HostDealer => hosting && IsAdmitted ? authority : null;
@@ -191,7 +210,16 @@ namespace Poker.Online
                     if (entry.Key == runner.LocalPlayer)
                         while (localRequests.Count != 0 && !closed) Dispatch(entry.Key, entry.Value, localRequests.Dequeue());
                     while (entry.Value.Inbox.TryRead(out var envelope) && !closed)
-                        Dispatch(entry.Key, entry.Value, envelope.request);
+                    {
+                        if (envelope.kind == LookMessage) ApplyLook(entry.Value, envelope.lookYaw);
+                        else if (envelope.kind == EmoteMessage) ApplyEmote(entry.Value, envelope.emote, envelope.lookYaw);
+                        else
+                        {
+                            entry.Value.SupportsLook = envelope.supportsLook;
+                            entry.Value.SupportsEmotes = envelope.supportsEmotes;
+                            Dispatch(entry.Key, entry.Value, envelope.request);
+                        }
+                    }
                 }
                 if (IsAdmitted)
                 {
@@ -200,9 +228,23 @@ namespace Poker.Online
                     socialProgress?.Tick(now);
                 }
                 Publish();
+                PublishLooks(now);
             }
             while (inbox.TryRead(out var received) && !closed)
-                foreach (var response in received.replies) Receive(response);
+            {
+                if (received.kind == LookMessage) Array.Copy(received.seatLooks, seatLooks, seatLooks.Length);
+                else if (received.kind == EmoteMessage)
+                {
+                    seatLooks[received.emoteSeat - 1] = received.lookYaw;
+                    EmoteReceived?.Invoke(received.emoteSeat, received.emote, received.lookYaw);
+                }
+                else
+                {
+                    hostSupportsLook = received.supportsLook;
+                    hostSupportsEmotes = received.supportsEmotes;
+                    foreach (var response in received.replies) Receive(response);
+                }
+            }
             if (IsAdmitted && (speechHistory.NeedsCatchUp || eliminatedSpeechHistory.NeedsCatchUp) && now >= nextSpeechSync)
             { nextSpeechSync = now + 0.25; Send(new HoldemWireRequest { type = "sync" }); }
         }
@@ -229,13 +271,91 @@ namespace Poker.Online
                 if (localRequests.Count >= 64) { RecordConnectionError("LocalInputOverflow"); Dispose(); return false; }
                 localRequests.Enqueue(request); return true;
             }
+            return SendToHost(new Envelope { kind = 1, request = request, supportsLook = true, supportsEmotes = true });
+        }
+        private bool SendToHost(Envelope envelope)
+        {
             try
             {
-                var envelope = new Envelope { sequence = checked(++sent), kind = 1, request = request, connection = connectionToken };
+                envelope.sequence = checked(++sent);
+                envelope.connection = connectionToken;
                 byte[] bytes = Encode(envelope);
                 runner.SendReliableDataToServer(Key(1, envelope.sequence), bytes); return true;
             }
             catch (Exception) { RecordConnectionError("SendFailed"); Dispose(); return false; }
+        }
+
+        public int ReadLook(int seat) => seat >= 1 && seat <= seatLooks.Length ? seatLooks[seat - 1] : 0;
+
+        public void SendEmote(int emote, int yaw)
+        {
+            if (!IsAdmitted || Latest?.game?.hasResult != false || !ValidEmote(emote, yaw)) return;
+            if (hosting)
+            {
+                if (peers.TryGetValue(runner.LocalPlayer, out var peer)) ApplyEmote(peer, emote, yaw);
+            }
+            else if (!hostSupportsEmotes || !SendToHost(new Envelope { kind = EmoteMessage, emote = emote, lookYaw = yaw })) return;
+            // The emote can update the published look between regular samples.
+            if (lastSentLook != yaw) lastSentLook = null;
+        }
+
+        private void ApplyEmote(Peer peer, int emote, int yaw)
+        {
+            double now = Time.realtimeSinceStartupAsDouble;
+            if (Latest?.game?.hasResult != false || now < peer.NextEmote
+                || !authority.TryGetBinding(peer.Connection, out var sender) || !sender.IsAdmitted || sender.HasLeftLobby) return;
+            peer.NextEmote = now + 1;
+            SetSeatLook(sender.Seat, yaw);
+            foreach (var entry in new List<KeyValuePair<PlayerRef, Peer>>(peers))
+                if (entry.Key != runner.LocalPlayer && entry.Value.SupportsEmotes
+                    && authority.TryGetBinding(entry.Value.Connection, out var receiver) && receiver.IsAdmitted && !receiver.HasLeftLobby)
+                    SendToGuest(entry.Key, entry.Value, new Envelope { kind = EmoteMessage, emote = emote, emoteSeat = sender.Seat, lookYaw = yaw });
+            EmoteReceived?.Invoke(sender.Seat, emote, yaw);
+        }
+
+        public void SendLook(int yaw)
+        {
+            double now = Time.realtimeSinceStartupAsDouble;
+            if (!IsAdmitted || Latest?.hasGame != true || (!hosting && !hostSupportsLook) || now < nextLookSend) return;
+            yaw = Mathf.Clamp(yaw, -MaxLookYaw, MaxLookYaw);
+            if (yaw == lastSentLook) return;
+            nextLookSend = now + .10;
+            if (hosting)
+            {
+                if (!peers.TryGetValue(runner.LocalPlayer, out var peer)) return;
+                ApplyLook(peer, yaw);
+            }
+            else if (!SendToHost(new Envelope { kind = LookMessage, lookYaw = yaw })) return;
+            lastSentLook = yaw;
+        }
+
+        private void ApplyLook(Peer peer, int yaw)
+        {
+            // Resolve the seat from the admitted connection.
+            if (Latest?.hasGame == true && authority.TryGetBinding(peer.Connection, out var binding)
+                && binding.IsAdmitted && !binding.HasLeftLobby)
+                SetSeatLook(binding.Seat, yaw);
+        }
+
+        private void SetSeatLook(int seat, int yaw)
+        {
+            if (seat < 1 || seat > seatLooks.Length || seatLooks[seat - 1] == yaw) return;
+            seatLooks[seat - 1] = yaw;
+            lookRevision++;
+        }
+
+        private void PublishLooks(double now)
+        {
+            if (Latest?.hasGame != true || now < nextLookPublish) return;
+            nextLookPublish = now + .10;
+            foreach (var entry in new List<KeyValuePair<PlayerRef, Peer>>(peers))
+            {
+                var peer = entry.Value;
+                if (entry.Key == runner.LocalPlayer || !peer.SupportsLook || peer.PublishedLookRevision == lookRevision
+                    || !authority.TryGetBinding(peer.Connection, out var binding) || !binding.IsAdmitted || binding.HasLeftLobby) continue;
+                SendToGuest(entry.Key, peer, new Envelope { kind = LookMessage, seatLooks = seatLooks });
+                peer.PublishedLookRevision = lookRevision;
+            }
         }
         private void Dispatch(PlayerRef player, Peer peer, HoldemWireRequest request)
         {
@@ -272,10 +392,15 @@ namespace Poker.Online
         {
             if (closed) return;
             if (player == runner.LocalPlayer) { foreach (var item in items) Receive(item); return; }
+            SendToGuest(player, peer, new Envelope { kind = 2, replies = items, supportsLook = true, supportsEmotes = true });
+        }
+        private void SendToGuest(PlayerRef player, Peer peer, Envelope envelope)
+        {
             if (!runner.IsPlayerCommitted(player) || !peers.TryGetValue(player, out var current) || current != peer) return;
             try
             {
-                var envelope = new Envelope { sequence = checked(++peer.Sent), kind = 2, replies = items, connection = peer.Token };
+                envelope.sequence = checked(++peer.Sent);
+                envelope.connection = peer.Token;
                 runner.SendReliableDataToPlayer(player, Key(2, envelope.sequence), Encode(envelope));
             }
             catch (Exception) { Drop(player); }
@@ -356,7 +481,9 @@ namespace Poker.Online
                 { Drop(player); return; }
                 if (hosting)
                 {
-                    if (envelope.kind != 1 || envelope.request == null || envelope.replies != null && envelope.replies.Length > 0)
+                    bool look = envelope.kind == LookMessage && ValidLook(envelope.lookYaw);
+                    bool emote = envelope.kind == EmoteMessage && envelope.emoteSeat == 0 && ValidEmote(envelope.emote, envelope.lookYaw);
+                    if ((!look && !emote && (envelope.kind != 1 || envelope.request == null)) || envelope.replies?.Length > 0)
                     { Debug.LogWarning("OMC_FUSION_PACKET_REJECT host-envelope"); Drop(player); return; }
                     if (envelope.connection != peer.Token) return; // Previous connection generation.
                     if (!peer.Inbox.Accept(envelope.sequence, envelope, data.Length)) Drop(player);
@@ -367,18 +494,34 @@ namespace Poker.Online
                     // (verified with the official two-process relay). Peer proxy forwarding is disabled
                     // in Config; this lane also requires our connection generation and server envelope kind.
                     if (envelope.connection != connectionToken) return;
-                    if (player != runner.LocalPlayer || envelope.kind != 2 || envelope.replies == null
-                        || envelope.replies.Length < 1 || envelope.replies.Length > 2
+                    bool look = envelope.kind == LookMessage
+                        && envelope.seatLooks?.Length == seatLooks.Length && Array.TrueForAll(envelope.seatLooks, ValidLook);
+                    bool emote = envelope.kind == EmoteMessage && envelope.emoteSeat >= 1 && envelope.emoteSeat <= seatLooks.Length
+                        && ValidEmote(envelope.emote, envelope.lookYaw);
+                    if (player != runner.LocalPlayer || (!look && !emote && (envelope.kind != 2 || envelope.replies == null
+                        || envelope.replies.Length < 1 || envelope.replies.Length > 2))
                         || !inbox.Accept(envelope.sequence, envelope, data.Length))
                     { RecordConnectionError("InvalidServerEnvelope"); Debug.LogWarning("OMC_FUSION_PACKET_REJECT client-envelope source=" + player); Dispose(); }
                 }
             }
             catch (Exception) { Drop(player); }
         }
+        private static bool ValidLook(int yaw) => yaw >= -MaxLookYaw && yaw <= MaxLookYaw;
+        private static bool ValidEmote(int emote, int yaw) => emote >= 1 && emote <= 7 && ValidLook(yaw);
+        private void DisconnectPeer(PlayerRef player, Peer peer)
+        {
+            if (authority != null)
+            {
+                if (authority.TryGetBinding(peer.Connection, out var binding) && binding.IsAdmitted)
+                    SetSeatLook(binding.Seat, 0);
+                authority.Disconnect(peer.Connection);
+            }
+            peers.Remove(player);
+        }
         private void Drop(PlayerRef player)
         {
             if (!hosting || runner == null || player == runner.LocalPlayer) { Dispose(); return; }
-            if (peers.TryGetValue(player, out var peer)) { authority?.Disconnect(peer.Connection); peers.Remove(player); }
+            if (peers.TryGetValue(player, out var peer)) DisconnectPeer(player, peer);
             if (player.IsRealPlayer && runner.IsPlayerCommitted(player)) runner.Disconnect(player);
         }
         public void OnPlayerJoined(NetworkRunner source, PlayerRef player)
@@ -400,7 +543,7 @@ namespace Poker.Online
         public void OnPlayerLeft(NetworkRunner source, PlayerRef player)
         {
             if (source == runner && hosting && peers.TryGetValue(player, out var peer))
-            { authority?.Disconnect(peer.Connection); peers.Remove(player); }
+                DisconnectPeer(player, peer);
         }
         // Only an intentional host exit is announced. A lost connection can still be retried.
         public async Task EndHostedRoom()

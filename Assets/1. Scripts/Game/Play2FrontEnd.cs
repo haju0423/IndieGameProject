@@ -10,9 +10,12 @@ public sealed class Play2FrontEnd : MonoBehaviour
     private RectTransform canvasRect;
     private Play2TablePreview table;
     internal RectTransform HudRoot { get; private set; }
+    internal Canvas HudCanvas => canvasRect.GetComponent<Canvas>();
     internal TMP_FontAsset Font => chatCanvas.Font;
     internal bool WaitingForSpectatorRequest() => chatCanvas.WaitingForSpectatorRequest();
     internal bool CaptureChatInput() => chatCanvas.CaptureTableInput();
+    internal bool CanLookAround => hud?.CanOpenChat == true && !chatCanvas.IsTyping;
+    internal bool CanOpenEmotes => CanLookAround && hud.CanOpenEmotes;
 
     public void Initialize(Play2TablePreview table)
     {
