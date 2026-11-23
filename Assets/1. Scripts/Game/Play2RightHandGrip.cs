@@ -3,6 +3,11 @@ using UnityEngine;
 
 internal sealed class Play2RightHandGrip
 {
+    internal const float PreviewViewCardScale = 1.17f;
+    internal const float PreviewOpponentCardScale = 1.10f;
+    internal const float PreviewSpread = 12f;
+    internal static readonly Vector3 PreviewViewPoint = new(.10f, -.19f, .48f);
+    internal static readonly Quaternion PreviewViewFacing = Quaternion.Euler(-78f, 7f, -7f);
     private static readonly string[] Digits = { "Thumb", "Index", "Middle", "Ring", "Pinky" };
     private static readonly Vector3 ReleaseDirection = new Vector3(0.65f, 1f, -0.70f);
     private static readonly Vector3[] CatCurl =
@@ -42,9 +47,32 @@ internal sealed class Play2RightHandGrip
         }
     }
 
+    [Serializable]
+    private sealed class PreviewPoses
+    {
+        public PreviewPose[] characters;
+    }
+
+    [Serializable]
+    private sealed class PreviewPose
+    {
+        public string name;
+        public float wristScale;
+        public Vector3 contactPosition;
+        public Quaternion contactRotation;
+        public Quaternion[] joints;
+    }
+
+    private static readonly Lazy<PreviewPoses> ReferencePoses = new(() =>
+    {
+        var data = Resources.Load<TextAsset>("TablePresentation/RightHandCardGrip");
+        return data == null ? null : JsonUtility.FromJson<PreviewPoses>(data.text);
+    });
+
     private readonly Transform[,] joints = new Transform[5, 4];
     private readonly Quaternion[,] open = new Quaternion[5, 3];
     private readonly Quaternion[,] closed = new Quaternion[5, 3];
+    private readonly Quaternion[,] held = new Quaternion[5, 3];
     private readonly float thumbClearanceAngle;
     private readonly float thumbReleaseAngle;
 
@@ -52,8 +80,9 @@ internal sealed class Play2RightHandGrip
     internal Transform Forearm { get; }
     internal Transform Wrist { get; }
     internal Pose Contact { get; }
+    internal float PreviewScale { get; } = 1f;
 
-    internal Play2RightHandGrip(GameObject player)
+    internal Play2RightHandGrip(GameObject player, bool usePreviewPose = false)
     {
         var bones = player.GetComponentsInChildren<Transform>(true);
         Transform FindBone(string name) =>
@@ -63,11 +92,12 @@ internal sealed class Play2RightHandGrip
         UpperArm = FindBone("Arm");
         Forearm = FindBone("ForeArm");
         Wrist = FindBone("Hand");
-        var profile = player.GetComponent<Animator>().runtimeAnimatorController.name switch
+        string character = CharacterFor(player);
+        var profile = character switch
         {
-            "CowAnimator" => CowGrip,
-            "FoxAnimator" => FoxGrip,
-            "OwlAnimator" => OwlGrip,
+            "Cow" => CowGrip,
+            "Fox" => FoxGrip,
+            "Owl" => OwlGrip,
             _ => null
         };
         thumbClearanceAngle = profile?.ThumbClearanceAngle ?? 19f;
@@ -122,7 +152,72 @@ internal sealed class Play2RightHandGrip
         for (int digit = 0; digit < Digits.Length; digit++)
             for (int joint = 0; joint < 3; joint++)
                 closed[digit, joint] = joints[digit, joint].localRotation;
+        SetClosure(1f);
+        for (int digit = 0; digit < Digits.Length; digit++)
+            for (int joint = 0; joint < 3; joint++)
+                held[digit, joint] = joints[digit, joint].localRotation;
         SetClosure(0f);
+
+        // These joint angles and the wrist-local contact come from the seated EmotionTest grip.
+        // The ShowcaseCast avatars share the same finger bones but use a different idle pose.
+        var references = usePreviewPose ? ReferencePoses.Value?.characters : null;
+        var reference = references == null ? null : Array.Find(references, pose => pose.name == character);
+        if (reference?.joints?.Length == held.Length && reference.wristScale > 0f)
+        {
+            Contact = new Pose(reference.contactPosition, reference.contactRotation);
+            PreviewScale = Wrist.lossyScale.x / reference.wristScale;
+            for (int digit = 0; digit < Digits.Length; digit++)
+                for (int joint = 0; joint < 3; joint++)
+                    held[digit, joint] = reference.joints[digit * 3 + joint];
+        }
+    }
+
+    private static string CharacterFor(GameObject player)
+    {
+        string controller = player.GetComponent<Animator>().runtimeAnimatorController.name;
+        // The imported ShowcaseCast avatars share the Presentation controller name.
+        // Their meshes have the same vertex counts as the original character rigs.
+        if (controller == "Presentation")
+        {
+            return player.GetComponentInChildren<SkinnedMeshRenderer>(true).sharedMesh.vertexCount switch
+            {
+                4268 => "Cat",
+                4426 => "Cow",
+                4421 => "Fox",
+                4393 => "Owl",
+                _ => null
+            };
+        }
+        return controller switch
+        {
+            "CatAnimator" => "Cat",
+            "CowAnimator" => "Cow",
+            "FoxAnimator" => "Fox",
+            "OwlAnimator" => "Owl",
+            _ => null
+        };
+    }
+
+    internal static Pose FanCardPose(Vector3 pinch, Quaternion facing, float spread, int side, float cardScale, float handScale)
+    {
+        Quaternion rotation = facing * Quaternion.AngleAxis(spread * side, Vector3.up);
+        Vector3 offset = new(.012f * side * handScale, .00175f * side * handScale, .044f * cardScale);
+        Vector3 position = pinch - facing * Vector3.right * (.026f * handScale) + rotation * offset;
+        return new Pose(position, rotation);
+    }
+
+    internal void BlendHeldPose(float weight)
+    {
+        for (int digit = 0; digit < Digits.Length; digit++)
+        {
+            for (int joint = 0; joint < 2; joint++)
+            {
+                var bone = joints[digit, joint];
+                bone.localRotation = Quaternion.Slerp(bone.localRotation, held[digit, joint], weight);
+            }
+            // The table rig animates the first two joints. Reset the fingertip when the grip releases.
+            joints[digit, 2].localRotation = Quaternion.Slerp(open[digit, 2], held[digit, 2], weight);
+        }
     }
 
     internal void SetClosure(float amount, float thumbRelease = 0f, float incomingCard = 0f)

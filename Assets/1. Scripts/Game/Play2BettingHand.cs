@@ -19,7 +19,7 @@ internal sealed class Play2BettingHand
     internal Play2BettingHand(GameObject actor, Transform view)
     {
         camera = view;
-        left = view == null;
+        left = !Play2CardGrip.UsesLeftHand;
         if (view != null)
         {
             viewModel = Object.Instantiate(actor, view, false);
@@ -70,7 +70,7 @@ internal sealed class Play2BettingHand
     {
         // Start below the frame (or in the seated idle pose), then pinch the chip on the felt.
         const float windupEnd = .23f, followEnd = .44f;
-        Vector3 home = camera != null ? camera.TransformPoint(new Vector3(.29f, -.48f, .23f)) : restingPad;
+        Vector3 home = camera != null ? ViewPoint(new Vector3(.29f, -.48f, .23f)) : restingPad;
         Vector3 direction = facing * Vector3.forward;
         Vector3 windup = start - direction * .018f + Vector3.up * (aimed ? .047f : .025f);
         float approach = Mathf.SmoothStep(0f, 1f, time / PickupTime);
@@ -111,7 +111,7 @@ internal sealed class Play2BettingHand
         Vector3 side = Vector3.Cross(Vector3.up, toward) * (left ? -1f : 1f);
         float rub = Mathf.Sin(Mathf.Clamp01((elapsed - .32f) / .31f) * Mathf.PI * 2f);
         cheek += (Vector3.up * .013f + toward * .009f) * rub;
-        Vector3 home = camera != null ? camera.TransformPoint(new Vector3(.31f, -.47f, .23f)) : restingPad;
+        Vector3 home = camera != null ? ViewPoint(new Vector3(.31f, -.47f, .23f)) : restingPad;
         Quaternion palm = fingers.PalmRotation(left, Vector3.up, -side);
         PlacePalm(Vector3.Lerp(home, cheek, weight), Quaternion.Slerp(restingWrist, palm, weight), .18f * weight, fingertips: true);
     }
@@ -128,7 +128,7 @@ internal sealed class Play2BettingHand
         float approach = Mathf.SmoothStep(0, 1, Mathf.Clamp01(time / .18f));
         float withdraw = Mathf.SmoothStep(0, 1, Mathf.Clamp01((time - Play2TableChips.PushEnd) / .29f));
         Quaternion down = fingers.PalmRotation(left, facing * Vector3.forward, Vector3.down);
-        Vector3 home = camera != null ? camera.TransformPoint(new Vector3(.31f, -.48f, .16f)) : restingPad;
+        Vector3 home = camera != null ? ViewPoint(new Vector3(.31f, -.48f, .16f)) : restingPad;
         Quaternion rest = camera != null ? down : restingWrist;
         float weight = approach * (1f - withdraw);
         PlacePalm(Vector3.Lerp(home, point, weight), Quaternion.Slerp(rest, down, weight), .32f * weight, true);
@@ -170,7 +170,7 @@ internal sealed class Play2BettingHand
         Vector3 toward = Vector3.ProjectOnPlane(target - origin, Vector3.up).normalized;
         Vector3 point = origin + toward * .12f + Vector3.up * (.19f * weight);
         if (camera != null)
-            point = camera.TransformPoint(Vector3.Lerp(new Vector3(.30f, -.43f, .29f), new Vector3(.20f, -.14f, .53f), weight));
+            point = ViewPoint(Vector3.Lerp(new Vector3(.30f, -.43f, .29f), new Vector3(.20f, -.14f, .53f), weight));
         if (gesture == Play2Gesture.Point)
         {
             if (camera == null) point = origin + toward * (.22f * weight) + Vector3.up * (.12f * weight);
@@ -178,16 +178,16 @@ internal sealed class Play2BettingHand
         else if (gesture == Play2Gesture.ThumbsDown)
         {
             if (camera == null) point = origin + toward * .24f + Vector3.up * (.15f * weight);
-            else point = camera.TransformPoint(Vector3.Lerp(new Vector3(.30f, -.43f, .29f), new Vector3(.20f, -.10f, .56f), weight));
+            else point = ViewPoint(Vector3.Lerp(new Vector3(.30f, -.43f, .29f), new Vector3(.20f, -.10f, .56f), weight));
         }
         else if (gesture == Play2Gesture.Celebrate)
         {
             // Draw a fist towards the chest, with one short upward pump.
             float pump = Mathf.Sin(Mathf.Clamp01((elapsed - .22f) / .46f) * Mathf.PI);
             point = camera != null
-                ? camera.TransformPoint(Vector3.Lerp(new Vector3(.32f, -.42f, .33f),
+                ? ViewPoint(Vector3.Lerp(new Vector3(.32f, -.42f, .33f),
                     new Vector3(.235f, -.13f + .045f * pump, .50f), weight))
-                : upper.position + toward * .14f - Vector3.Cross(Vector3.up, toward) * .075f
+                : upper.position + toward * .14f + Vector3.Cross(Vector3.up, toward) * (left ? -.075f : .075f)
                     + Vector3.up * (.055f + .060f * pump);
         }
         var rotation = fingers.PalmRotation(left, camera == null ? Vector3.up : camera.up,
@@ -243,13 +243,19 @@ internal sealed class Play2BettingHand
         Vector3 elbow = fromSide ? new Vector3(.48f, -.43f, .22f) : new Vector3(.28f, -.48f, .12f);
         Quaternion neutralForearm = rotation * Quaternion.Inverse(wristRest);
         Vector3 neutralDirection = neutralForearm * wrist.localPosition.normalized;
-        Vector3 towardHand = target - camera.TransformPoint(elbow);
+        Vector3 towardHand = target - ViewPoint(elbow);
         Vector3 armDirection = alignSleeve ? towardHand.normalized : Vector3.RotateTowards(neutralDirection, towardHand.normalized, 40f * Mathf.Deg2Rad, 0f);
         Quaternion armRotation = Quaternion.FromToRotation(neutralDirection, armDirection) * neutralForearm;
         Transform body = viewModel.transform;
         body.rotation = armRotation * Quaternion.Inverse(lower.rotation) * body.rotation;
         body.position += target - wrist.position;
-        Play2TableArm.AnchorViewSleeve(upper, lower, camera, false);
+        Play2TableArm.AnchorViewSleeve(upper, lower, camera, left);
+    }
+
+    private Vector3 ViewPoint(Vector3 local)
+    {
+        if (left) local.x = -local.x;
+        return camera.TransformPoint(local);
     }
 
     internal void Release()

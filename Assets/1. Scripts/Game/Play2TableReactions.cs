@@ -198,7 +198,7 @@ internal sealed class Play2TableReactions
                 continue;
             }
             Vector3 outward = Vector3.ProjectOnPlane(eyes[i].position - table.TableCenter, Vector3.up).normalized;
-            Vector3 side = i + 1 == viewer ? camera.transform.right : Vector3.Cross(Vector3.up, outward);
+            Vector3 side = i + 1 == viewer ? -camera.transform.right : Vector3.Cross(Vector3.up, outward);
             Vector3 origin = table.TableCenter + outward * .48f + side * .14f + Vector3.up * .12f;
             if (gestures[i] == Play2Gesture.Despair) chips.RestHand(i);
             else if (gestures[i] == Play2Gesture.Celebrate)

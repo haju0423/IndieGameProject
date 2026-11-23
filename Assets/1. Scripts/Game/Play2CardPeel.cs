@@ -3,7 +3,7 @@ using UnityEngine;
 // A private, flexible copy of this card's printed surfaces. The far edge stays on the felt.
 internal sealed class Play2CardPeel
 {
-    private static readonly Vector3 CurlDirection = new Vector3(-.22f, 0f, .9755f).normalized;
+    private static readonly Vector3 CurlDirection = new Vector3(.22f, 0f, .9755f).normalized;
     private const int Columns = 8, Rows = 16;
     private const int FaceVertices = Columns * Rows * 4;
     private readonly Mesh mesh;

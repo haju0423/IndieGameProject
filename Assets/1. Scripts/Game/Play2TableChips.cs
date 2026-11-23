@@ -279,7 +279,7 @@ internal sealed class Play2TableChips : MonoBehaviour
         Vector3 seat = transform.InverseTransformPoint(eyes[activeSeat].position);
         Vector3 outward = new Vector3(seat.x, 0, seat.z).normalized;
         Vector3 side = activeSeat + 1 == viewer
-            ? transform.InverseTransformDirection(viewCamera.right)
+            ? transform.InverseTransformDirection(-viewCamera.right)
             : Vector3.Cross(Vector3.up, outward);
         int landingSlot = Mathf.Max(0, targetCount - 1);
         flightEnd = StackPosition(landingSlot);
@@ -319,8 +319,8 @@ internal sealed class Play2TableChips : MonoBehaviour
             // The cheek is just beside the lens. Let the chip reach the edge of
             // the view and let only part of the reacting hand enter that same edge.
             var camera = viewCamera.GetComponent<Camera>();
-            strikeAnchor = viewCamera.InverseTransformPoint(camera.ViewportToWorldPoint(new Vector3(.96f, .38f, .22f)));
-            rubAnchor = viewCamera.InverseTransformPoint(camera.ViewportToWorldPoint(new Vector3(1.09f, .32f, .24f)));
+            strikeAnchor = viewCamera.InverseTransformPoint(camera.ViewportToWorldPoint(new Vector3(.04f, .38f, .22f)));
+            rubAnchor = viewCamera.InverseTransformPoint(camera.ViewportToWorldPoint(new Vector3(-.09f, .32f, .24f)));
             return;
         }
         var head = heads[target];

@@ -72,7 +72,7 @@ public sealed class Play2EmotionPreview : MonoBehaviour
     private CardVisual CreateCard(Card card, bool own)
     {
         var visual = Instantiate(cardPrefab, tabletop);
-        visual.transform.localScale = Vector3.one * (own ? 1.17f : 1.10f);
+        visual.transform.localScale = Vector3.one * (own ? Play2RightHandGrip.PreviewViewCardScale : Play2RightHandGrip.PreviewOpponentCardScale);
         visual.SetCard(card);
         visual.transform.Find("Front").gameObject.SetActive(own);
         return visual;
@@ -331,8 +331,8 @@ public sealed class Play2EmotionPreview : MonoBehaviour
             Quaternion facing;
             if (viewModel != null)
             {
-                point = view.TransformPoint(new Vector3(.10f, -.19f, .48f));
-                facing = view.rotation * Quaternion.Euler(-78f, 7f, -7f);
+                point = view.TransformPoint(Play2RightHandGrip.PreviewViewPoint);
+                facing = view.rotation * Play2RightHandGrip.PreviewViewFacing;
             }
             else
             {
@@ -362,16 +362,15 @@ public sealed class Play2EmotionPreview : MonoBehaviour
 
             wrist.rotation = wristRotation;
             fingers.SetClosure(1f);
-            point = wrist.TransformPoint(contact.position) - facing * Vector3.right * .026f;
+            point = wrist.TransformPoint(contact.position);
             PoseCard(first.transform, point, facing, -1);
             PoseCard(second.transform, point, facing, 1);
         }
 
         private static void PoseCard(Transform card, Vector3 point, Quaternion facing, int side)
         {
-            Quaternion fan = facing * Quaternion.AngleAxis(12f * side, Vector3.up);
-            Vector3 offset = new Vector3(.012f * side, .00175f * side, .044f * card.localScale.z);
-            card.SetPositionAndRotation(point + fan * offset, fan);
+            var pose = Play2RightHandGrip.FanCardPose(point, facing, Play2RightHandGrip.PreviewSpread, side, card.localScale.z, 1f);
+            card.SetPositionAndRotation(pose.position, pose.rotation);
         }
 
         internal void Release()

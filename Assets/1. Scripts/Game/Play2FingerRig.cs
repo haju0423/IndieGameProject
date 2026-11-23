@@ -223,24 +223,25 @@ public sealed partial class Play2FingerRig : MonoBehaviour
         }
     }
 
-    internal void PressCardBack(Vector3 target, float weight)
+    internal void PressCardBack(bool left, Vector3 target, float weight)
     {
-        var index = hands[0][1];
+        var index = hands[left ? 0 : 1][1];
         Vector3 pad = Pad(index);
         Vector3 end = pad + Vector3.ClampMagnitude(target - pad, .055f) * weight;
         Play2TableArm.ReachPoint(index.Proximal, index.Distal, pad, end, Vector3.up, weight);
     }
 
-    internal void SupportFan(Vector3 pinch, Quaternion fan, float scale, float weight)
+    internal void SupportFan(bool left, Vector3 pinch, Quaternion fan, float scale, float weight)
     {
-        Vector3 right = fan * Vector3.right;
+        var hand = hands[left ? 0 : 1];
+        Vector3 acrossCard = fan * (left ? Vector3.right : Vector3.left);
         Vector3 normal = fan * Vector3.up;
         Vector3 top = fan * Vector3.forward;
         // Stagger the contact points along the packet. A thumb and index pressed
         // tip to tip at a single point look as if they punch through both cards.
-        for (int i = 0; i < hands[0].Length; i++)
+        for (int i = 0; i < hand.Length; i++)
         {
-            var finger = hands[0][i];
+            var finger = hand[i];
             Vector3 pad = Pad(finger);
             float across, height, depth;
             if (i == 0) { across = .005f; height = .003f; depth = .010f; }
@@ -252,7 +253,7 @@ public sealed partial class Play2FingerRig : MonoBehaviour
                 float clearance = 1.5f * Mathf.Max(0f, padLength - .026f) / scale;
                 depth = (i == 1 ? -.016f : -.023f) - clearance;
             }
-            Vector3 target = pinch + scale * (right * across + top * height + normal * depth);
+            Vector3 target = pinch + scale * (acrossCard * across + top * height + normal * depth);
             Vector3 shift = Vector3.ClampMagnitude(target - pad, .055f);
             Play2TableArm.ReachPoint(finger.Proximal, finger.Distal, pad, pad + shift * weight, normal, weight);
         }
