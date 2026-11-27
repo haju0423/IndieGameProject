@@ -10,13 +10,15 @@ internal sealed partial class Play2TableHud
     private static readonly Color SeatActing = Play2UGui.Hex("14292FEF");
     private static readonly Color SeatAwarded = Play2UGui.Hex("473F2BEA");
     private static readonly Color VillageTurn = Play2UGui.Hex("6E793A");
+    private static readonly int[] SecondaryOrder = { 2, 0, 3 };
 
-    private bool village, themeChanged;
-    private RectTransform topBar, potPanel, actionTray, phaseBadge;
-    private Button leaveButton, settingsButton;
-    private TextMeshProUGUI phase;
+    private bool village, themeChanged, actionMenuOpen;
+    private RectTransform topBar, potPanel, actionTray, phaseBadge, moreActionsPanel, moreActionsChevron;
+    private Button leaveButton, settingsButton, moreActionsButton;
+    private TextMeshProUGUI phase, turnContext, moreActionsLabel;
+    private Image turnMarker;
     private Shadow potShadow;
-    private readonly RectTransform[] actionKeys = new RectTransform[4];
+    private readonly CanvasGroup[] seatVisibility = new CanvasGroup[4];
     private readonly Outline[] marketActionEdges = new Outline[4];
 
     private void BuildVillageChrome(TMP_FontAsset font)
@@ -36,23 +38,56 @@ internal sealed partial class Play2TableHud
             Play2HudArt.MarketLightText, font, style: FontStyles.Bold);
         Play2HudArt.Fit(phase, 12);
 
-        actionTray = Play2HudArt.Plate("Market Action Tray", controls, new Vector2(0, 9), new Vector2(370, 110), "MarketPanel");
+        actionTray = Play2HudArt.Plate("Market Action Tray", controls, Vector2.zero, new Vector2(318, 107), "MarketPanel");
         actionTray.SetAsFirstSibling();
         var rim = AddMarketEdge(actionTray);
         rim.enabled = true;
         var shadow = actionTray.gameObject.AddComponent<Shadow>();
         shadow.effectColor = new Color(.16f, .22f, .11f, .6f);
         shadow.effectDistance = new Vector2(0, -4);
+        turnMarker = Play2UGui.Image(Play2UGui.Rect("Your Turn Marker", controls, new Vector2(-145, 27),
+            new Vector2(3, 22)), VillageTurn);
+        turnContext = Play2UGui.Text("Turn Cost", controls, "", new Vector2(81, 25), new Vector2(130, 30), 16,
+            Play2HudArt.MarketInk, font, TextAlignmentOptions.MidlineRight);
+        turnContext.textWrappingMode = TextWrappingModes.NoWrap;
+        Play2HudArt.Fit(turnContext, 13);
+
+        moreActionsButton = Play2HudArt.Button("More Table Actions", controls, "다른 행동", new Vector2(93, -18),
+            new Vector2(108, 46), "MarketButton", Play2HudArt.MarketInk, font, ToggleMoreActions, 16);
+        moreActionsLabel = moreActionsButton.GetComponentInChildren<TextMeshProUGUI>();
+        moreActionsLabel.textWrappingMode = TextWrappingModes.NoWrap;
+        moreActionsLabel.rectTransform.anchoredPosition = new Vector2(-9, 0);
+        Play2HudArt.Fit(moreActionsLabel, 13);
+        moreActionsChevron = Play2UGui.Rect("Chevron", moreActionsButton.transform, new Vector2(36, 1), new Vector2(12, 8));
+        for (int side = -1; side <= 1; side += 2)
+        {
+            var stroke = Play2UGui.Panel("Stroke", moreActionsChevron, new Vector2(side * 3, 0),
+                new Vector2(8, 1.6f), Play2HudArt.MarketInk);
+            stroke.localRotation = Quaternion.Euler(0, 0, 45f * side);
+        }
+        AddMarketEdge((RectTransform)moreActionsButton.transform).enabled = true;
+        moreActionsPanel = Play2HudArt.Plate("Other Table Actions", controls, new Vector2(55, 61),
+            new Vector2(208, 144), "MarketPanel", true);
+        moreActionsPanel.pivot = new Vector2(.5f, 0);
+        moreActionsPanel.anchoredPosition = new Vector2(55, 61);
+        AddMarketEdge(moreActionsPanel).enabled = true;
+
         for (int i = 0; i < actionRows.Length; i++)
         {
             var row = actionRows[i].rectTransform;
-            actionKeys[i] = Play2HudArt.Plate("Shortcut", row, new Vector2(i == 3 ? -26 : -39, 0),
-                new Vector2(20, 21), "MarketSeat");
-            AddMarketEdge(actionKeys[i]).enabled = true;
-            Play2UGui.Text("Key", actionKeys[i], "FERX"[i].ToString(), Vector2.zero, new Vector2(19, 20), 12,
-                Play2HudArt.MarketInk, font, style: FontStyles.Bold);
+            if (i == 1)
+                row.anchoredPosition = new Vector2(-57, -18);
+            else
+            {
+                row.SetParent(moreActionsPanel, false);
+                row.anchorMin = row.anchorMax = new Vector2(.5f, 1);
+                row.sizeDelta = new Vector2(190, 39);
+                actionLabels[i].rectTransform.sizeDelta = new Vector2(166, 36);
+                actionLabels[i].alignment = TextAlignmentOptions.MidlineLeft;
+            }
             marketActionEdges[i] = AddMarketEdge(row);
         }
+        RefreshTurnControls();
 
         AddMarketEdge((RectTransform)leaveButton.transform);
         AddMarketEdge((RectTransform)settingsButton.transform);
@@ -65,7 +100,6 @@ internal sealed partial class Play2TableHud
         themeChanged = true;
         topBar.gameObject.SetActive(village);
         phaseBadge.gameObject.SetActive(village);
-        actionTray.gameObject.SetActive(village && acting);
         potShadow.enabled = !village;
         potPanel.anchorMin = potPanel.anchorMax = village ? new Vector2(.5f, 1f) : Vector2.up;
         potPanel.sizeDelta = new Vector2(village ? 443 : 216, 52);
@@ -83,16 +117,20 @@ internal sealed partial class Play2TableHud
         ((RectTransform)feedback.transform.parent).anchoredPosition = new Vector2(0, village ? -91 : -32);
         ((RectTransform)notice.transform.parent).anchoredPosition = new Vector2(0, village ? -141 : -85);
 
-        Play2HudArt.Apply(ownTurn.GetComponent<Image>(), village ? "MarketMoss" : "PlayingBadge");
-        ownTurn.GetComponentInChildren<TMP_Text>(true).color = village ? Play2HudArt.MarketLightText : Play2UGui.Gold;
-        for (int i = 0; i < actionKeys.Length; i++)
+        foreach (var item in new[] { actionTray, moreActionsPanel })
         {
-            actionKeys[i].gameObject.SetActive(village);
-            marketActionEdges[i].enabled = village;
-            var label = actionLabels[i].rectTransform;
-            label.anchoredPosition = village ? new Vector2(9, 0) : Vector2.zero;
-            label.sizeDelta = actionRows[i].rectTransform.sizeDelta - new Vector2(village ? 37 : 10, 4);
+            Play2HudArt.Apply(item.GetComponent<Image>(), village ? "MarketPanel" : "PlayingPanel");
+            item.GetComponent<Outline>().enabled = village;
         }
+        Play2HudArt.Apply((Image)moreActionsButton.targetGraphic, village ? "MarketButton" : "PlayingAction");
+        moreActionsButton.GetComponent<Outline>().enabled = village;
+        moreActionsLabel.color = village ? Play2HudArt.MarketInk : Play2UGui.Cream;
+        foreach (Transform stroke in moreActionsChevron)
+            stroke.GetComponent<Image>().color = moreActionsLabel.color;
+        turnMarker.color = village ? VillageTurn : Play2UGui.Gold;
+        turnContext.color = village ? Play2HudArt.MarketInk : Play2UGui.Cream;
+        ownTurn.GetComponentInChildren<TMP_Text>(true).color = village ? Play2HudArt.MarketInk : Play2UGui.Gold;
+        foreach (var edge in marketActionEdges) edge.enabled = village;
 
         StylePicker(sizing);
         StylePicker(accusation);
@@ -102,6 +140,40 @@ internal sealed partial class Play2TableHud
         handGuide.SetVillageTheme(village);
         settlementCard.SetVillageTheme(village);
         AlignVillageChrome();
+    }
+
+    private void ToggleMoreActions()
+    {
+        if (!acting) return;
+        actionMenuOpen = !actionMenuOpen;
+        RefreshTurnControls();
+    }
+
+    private void CloseMoreActions()
+    {
+        actionMenuOpen = false;
+        RefreshTurnControls();
+    }
+
+    private void RefreshTurnControls()
+    {
+        actionTray.gameObject.SetActive(acting);
+        ownTurn.gameObject.SetActive(acting);
+        turnMarker.gameObject.SetActive(acting);
+        turnContext.gameObject.SetActive(acting);
+        actionRows[1].gameObject.SetActive(acting && actionOpacity[1].interactable);
+        int count = 0;
+        foreach (int index in SecondaryOrder)
+        {
+            bool available = acting && actionOpacity[index].interactable;
+            var row = actionRows[index].rectTransform;
+            row.gameObject.SetActive(actionMenuOpen && available);
+            if (available) row.anchoredPosition = new Vector2(0, -27 - count++ * 45);
+        }
+        moreActionsButton.gameObject.SetActive(count > 0);
+        moreActionsChevron.localRotation = Quaternion.Euler(0, 0, actionMenuOpen ? 180f : 0f);
+        moreActionsPanel.gameObject.SetActive(actionMenuOpen && count > 0);
+        moreActionsPanel.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, count * 45 + 9);
     }
 
     private void AlignVillageChrome()
@@ -171,16 +243,16 @@ internal sealed partial class Play2TableHud
     {
         if (village)
         {
-            Play2HudArt.Apply(actionRows[index], enabled && (index == 1 || index == 2 && !packet.game.legal.check && !packet.game.legal.call)
+            Play2HudArt.Apply(actionRows[index], enabled && index == 1
                 ? "MarketPrimary" : "MarketButton");
             if (!enabled) actionRows[index].color = Play2UGui.Hex("DDD0AC");
             actionLabels[index].color = enabled ? Play2HudArt.MarketInk : Play2HudArt.MarketMuted;
             return;
         }
 
-        Play2HudArt.Apply(actionRows[index], enabled && index == 2 ? "GoldButton" : "PlayingAction");
+        Play2HudArt.Apply(actionRows[index], enabled && index == 1 ? "GoldButton" : "PlayingAction");
         if (!enabled) actionRows[index].color = Play2UGui.Hex("1A282BFF");
-        actionLabels[index].color = !enabled ? Play2UGui.Hex("8FA19FFF") : index == 2 ? PaperInk : Play2UGui.Cream;
+        actionLabels[index].color = !enabled ? Play2UGui.Hex("8FA19FFF") : index == 1 ? PaperInk : Play2UGui.Cream;
     }
 
     private static Outline AddMarketEdge(RectTransform target)

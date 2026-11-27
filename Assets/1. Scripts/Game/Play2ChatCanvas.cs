@@ -33,7 +33,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
     private RectTransform marketDock, marketPanel;
     private Image inputBackground;
     private Button chatTab;
-    private readonly List<(RectTransform root, TMP_Text speaker, TMP_Text text)> rows = new();
+    private readonly List<(RectTransform root, TMP_Text speaker, TMP_Text text, int seat)> rows = new();
     private UnityEngine.UI.Outline inputFocus;
     private GameObject closeHint;
     private long firstMessage = -1, lastMessage = -1;
@@ -125,6 +125,8 @@ public sealed class Play2ChatCanvas : MonoBehaviour
 
     private void BuildLayout()
     {
+        messages.font = Play2HudArt.TableFont(messages.font);
+        input.fontAsset = Font;
         panelRect = (RectTransform)panel.transform;
         panelRect.pivot = Vector2.zero;
         originalPanel = panel.GetComponent<Graphic>();
@@ -252,6 +254,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         sendRect.sizeDelta = new Vector2(69, 34);
         send.targetGraphic = Play2HudArt.Skin(send.targetGraphic, "PlayingSend");
         sendLabel = send.GetComponentInChildren<TMP_Text>();
+        sendLabel.font = Font;
         sendLabel.color = ChatText;
         sendLabel.fontSize = 16;
         // Keep the action readable even while the empty composer cannot send.
@@ -515,7 +518,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
                 var item = allowed[i];
                 string card = item.AppliedCard.HasValue ? $"공용 {item.BoardIndex.Value + 1}번  {Play2HandGuide.CardText(item.AppliedCard.Value)}" : "문장 채택";
                 string meaning = string.IsNullOrWhiteSpace(item.Interpretation) ? "" : "\n" + item.Interpretation;
-                SetRow(i, Name(item.Speaker.Value), item.Text + meaning + "\n" + card);
+                SetRow(i, Name(item.Speaker.Value), item.Text + meaning + "\n" + card, item.Speaker.Value);
             }
             for (int i = 0; i < verdicts.Count; i++)
             {
@@ -547,7 +550,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         for (int i = 0; i < entries.Length; i++)
         {
             var entry = entries[i];
-            SetRow(i, Name(entry.seat), Play2TableReactions.Describe(entry.text, packet));
+            SetRow(i, Name(entry.seat), Play2TableReactions.Describe(entry.text, packet), entry.seat);
         }
         for (int i = entries.Length; i < rows.Count; i++) rows[i].root.gameObject.SetActive(false);
         RestoreScroll(keepScroll, offset);
@@ -555,17 +558,19 @@ public sealed class Play2ChatCanvas : MonoBehaviour
 
     private string Name(int seat) => packet.members.FirstOrDefault(m => m.seat == seat)?.name ?? $"{seat}번";
 
-    private void SetRow(int index, string name, string text)
+    private void SetRow(int index, string name, string text, int seat = 0)
     {
         if (index == rows.Count) rows.Add(CreateMessageRow());
         var row = rows[index];
-        row.speaker.text = name;
+        row.seat = seat;
+        rows[index] = row;
+        row.speaker.text = seat > 0 && seat == packet?.viewerSeat ? "나" : name;
         row.text.text = text;
         PaintRow(row);
         row.root.gameObject.SetActive(true);
     }
 
-    private void PaintRow((RectTransform root, TMP_Text speaker, TMP_Text text) row)
+    private void PaintRow((RectTransform root, TMP_Text speaker, TMP_Text text, int seat) row)
     {
         var surface = row.root.GetComponent<Image>();
         var layout = row.root.GetComponent<HorizontalLayoutGroup>();
@@ -573,14 +578,14 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         layout.padding.right = village ? 8 : 0;
         Play2HudArt.Apply(surface, "MarketPaper");
         if (!village) surface.color = Color.clear;
-        bool own = packet?.hasGame == true && row.speaker.text == Name(packet.viewerSeat);
+        bool own = row.seat > 0 && row.seat == packet?.viewerSeat;
         row.speaker.color = village
             ? own ? Play2HudArt.MarketBrown : Play2HudArt.MarketInk
             : own ? Play2UGui.Gold : GuestText;
         row.text.color = village ? Play2HudArt.MarketInk : ChatText;
     }
 
-    private (RectTransform root, TMP_Text speaker, TMP_Text text) CreateMessageRow()
+    private (RectTransform root, TMP_Text speaker, TMP_Text text, int seat) CreateMessageRow()
     {
         var root = Play2UGui.Rect("Chat Message", scroll.content, Vector2.zero, Vector2.zero);
         Play2UGui.Image(root, Color.clear);
@@ -608,7 +613,7 @@ public sealed class Play2ChatCanvas : MonoBehaviour
         textLayout.preferredWidth = 0;
         textLayout.minHeight = 25;
         textLayout.flexibleWidth = 1;
-        return (root, speaker, text);
+        return (root, speaker, text, 0);
     }
 
     private void Send()

@@ -7,6 +7,7 @@ internal static class Play2HudArt
 {
     private static readonly Dictionary<string, Sprite> Sprites = new();
     private static Sprite rounded;
+    private static TMP_FontAsset tableFont;
     private static readonly Dictionary<string, Color> Surfaces = new()
     {
         { "PinePanel", Play2UGui.Hex("18282AF5") },
@@ -35,6 +36,27 @@ internal static class Play2HudArt
     internal static readonly Color MarketInk = Play2UGui.Hex("2E452B"),
         MarketMuted = Play2UGui.Hex("566047"), MarketEdge = Play2UGui.Hex("988460"),
         MarketBrown = Play2UGui.Hex("553523"), MarketLightText = Play2UGui.Hex("FFF4D5");
+
+    internal static TMP_FontAsset TableFont(TMP_FontAsset fallback)
+    {
+        if (tableFont != null) return tableFont;
+        var regular = Resources.Load<Font>("InGameUI/Fonts/Pretendard-Regular");
+        var semiBold = Resources.Load<Font>("InGameUI/Fonts/Pretendard-SemiBold");
+        if (regular == null || semiBold == null) return fallback;
+
+        var body = CreateTableFont(regular);
+        var emphasis = CreateTableFont(semiBold);
+        if (body == null || emphasis == null) return fallback;
+        emphasis.fallbackFontAssetTable = new List<TMP_FontAsset> { fallback };
+        body.fallbackFontAssetTable = new List<TMP_FontAsset> { fallback };
+        body.fontWeightTable[(int)FontWeight.Bold / 100] =
+            new TMP_FontWeightPair { regularTypeface = emphasis };
+        return tableFont = body;
+    }
+
+    private static TMP_FontAsset CreateTableFont(Font source) =>
+        TMP_FontAsset.CreateFontAsset(source, 56, 7, UnityEngine.TextCore.LowLevel.GlyphRenderMode.SDFAA,
+            1024, 1024, AtlasPopulationMode.Dynamic, true);
 
     internal static void Apply(UnityEngine.UI.Image image, string asset)
     {
